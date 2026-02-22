@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from app.infrastructure.database.session import get_db
-from app.infrastructure.database.models import State, LGA, Zone, Custodian, School, User, UserRole
+from app.infrastructure.database.models import State, LGA, Zone, Custodian, School, BECESchool, User, UserRole
 from app.api.v1 import schemas_data as schemas
 from app.core.auth import get_current_user, check_role, check_state_not_locked
 from app.core.security import get_password_hash
@@ -535,12 +535,134 @@ async def delete_all_custodians(
     db.commit()
     return None
 
-@router.delete("/lgas/all", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/lgas/all", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_all_lgas(
     db: Session = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
 ):
     db.query(LGA).delete()
+    db.commit()
+    return None
+
+# --- BECE Schools ---
+@router.get("/bece-schools", response_model=List[schemas.BECESchool])
+async def get_bece_schools(
+    state_code: Optional[str] = None,
+    lga_code: Optional[str] = None,
+    custodian_code: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(BECESchool)
+    if current_user.role == UserRole.STATE.value:
+        query = query.filter(BECESchool.state_code == current_user.state_code)
+    elif state_code:
+        query = query.filter(BECESchool.state_code == state_code)
+        
+    if lga_code:
+        query = query.filter(BECESchool.lga_code == lga_code)
+    if custodian_code:
+        query = query.filter(BECESchool.custodian_code == custodian_code)
+        
+    return query.all()
+
+@router.get("/bece-schools/{code}", response_model=schemas.BECESchool)
+async def get_bece_school(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    school = db.query(BECESchool).filter(BECESchool.code == code).first()
+    if not school:
+        raise HTTPException(status_code=404, detail="BECE School not found")
+    
+    if current_user.role == UserRole.STATE.value and school.state_code != current_user.state_code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+        
+    return school
+
+@router.post("/bece-schools", response_model=schemas.BECESchool, dependencies=[Depends(check_state_not_locked)])
+async def create_bece_school(
+    school: schemas.BECESchoolCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    school_data = school.dict()
+    from app.infrastructure.database.models import AccreditationStatus
+    if school_data.get("accreditation_status") == AccreditationStatus.ACCREDITED.value:
+        if not school_data.get("accredited_date"):
+            from datetime import datetime
+            school_data["accredited_date"] = datetime.now().isoformat()
+
+    db_school = BECESchool(**school_data)
+    db.add(db_school)
+    db.commit()
+    db.refresh(db_school)
+    
+    if school.email:
+        _create_or_update_state_user(db, db_school.state_code, db_school.name, school.email)
+        db.commit()
+        
+    return db_school
+
+@router.put("/bece-schools/{code}", response_model=schemas.BECESchool, dependencies=[Depends(check_state_not_locked)])
+async def update_bece_school(
+    code: str,
+    school_in: schemas.BECESchoolUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE]))
+):
+    db_school = db.query(BECESchool).filter(BECESchool.code == code).first()
+    if not db_school:
+        raise HTTPException(status_code=404, detail="BECE School not found")
+    
+    if current_user.role == UserRole.STATE.value and db_school.state_code != current_user.state_code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    old_email = db_school.email
+    update_data = school_in.dict(exclude_unset=True)
+
+    from app.infrastructure.database.models import AccreditationStatus
+    if "accreditation_status" in update_data:
+        if update_data["accreditation_status"] == AccreditationStatus.ACCREDITED.value:
+            if not update_data.get("accredited_date") and not db_school.accredited_date:
+                from datetime import datetime
+                update_data["accredited_date"] = datetime.now().isoformat()
+    
+    for field, value in update_data.items():
+        setattr(db_school, field, value)
+    
+    db.add(db_school)
+    db.commit()
+    db.refresh(db_school)
+    
+    new_email = update_data.get("email")
+    if new_email and new_email != old_email:
+        _create_or_update_state_user(db, db_school.state_code, db_school.name, new_email)
+        db.commit()
+        
+    return db_school
+
+@router.delete("/bece-schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
+async def delete_bece_school(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    db_school = db.query(BECESchool).filter(BECESchool.code == code).first()
+    if not db_school:
+        raise HTTPException(status_code=404, detail="BECE School not found")
+    
+    db.delete(db_school)
+    db.commit()
+    return None
+
+@router.delete("/bece-schools/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_bece_schools(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    db.query(BECESchool).delete()
     db.commit()
     return None
 

@@ -40,6 +40,7 @@ class State(Base):
     lgas = relationship("LGA", back_populates="state")
     custodians = relationship("Custodian", back_populates="state")
     schools = relationship("School", back_populates="state")
+    bece_schools = relationship("BECESchool", back_populates="state")
     users = relationship("User", back_populates="state")
 
 class LGA(Base):
@@ -51,6 +52,7 @@ class LGA(Base):
     state = relationship("State", back_populates="lgas")
     custodians = relationship("Custodian", back_populates="lga")
     schools = relationship("School", back_populates="lga")
+    bece_schools = relationship("BECESchool", back_populates="lga")
 
 class Custodian(Base):
     __tablename__ = "custodians"
@@ -64,6 +66,7 @@ class Custodian(Base):
     state = relationship("State", back_populates="custodians")
     lga = relationship("LGA", back_populates="custodians")
     schools = relationship("School", back_populates="custodian")
+    bece_schools = relationship("BECESchool", back_populates="custodian")
 
 class AccreditationStatus(enum.Enum):
     ACCREDITED = "Accredited"
@@ -84,3 +87,19 @@ class School(Base):
     state = relationship("State", back_populates="schools")
     lga = relationship("LGA", back_populates="schools")
     custodian = relationship("Custodian", back_populates="schools")
+
+class BECESchool(Base):
+    __tablename__ = "bece_schools"
+    code = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    state_code = Column(String, ForeignKey("states.code"))
+    lga_code = Column(String, ForeignKey("lgas.code"))
+    custodian_code = Column(String, ForeignKey("custodians.code"))
+    email = Column(String, nullable=True)
+    accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
+    accredited_date = Column(String, nullable=True) # ISO format date
+    status = Column(String, default="active", server_default="active")
+
+    state = relationship("State", back_populates="bece_schools")
+    lga = relationship("LGA", back_populates="bece_schools")
+    custodian = relationship("Custodian", back_populates="bece_schools")

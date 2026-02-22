@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 import pandas as pd
 import io
 from app.infrastructure.database.session import get_db
-from app.infrastructure.database.models import School, Custodian, State, LGA, Zone, User, UserRole
+from app.infrastructure.database.models import School, BECESchool, Custodian, State, LGA, Zone, User, UserRole
 from app.core.auth import check_role
 from app.core.security import get_password_hash
 from app.core.config import get_settings
@@ -43,6 +43,39 @@ async def upload_schools(
     db.bulk_save_objects(schools)
     db.commit()
     return {"message": f"Successfully uploaded {len(schools)} schools"}
+
+@router.post("/upload/bece-schools", status_code=status.HTTP_201_CREATED)
+async def upload_bece_schools(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    contents = await file.read()
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(io.BytesIO(contents), dtype=str)
+    else:
+        df = pd.read_excel(io.BytesIO(contents), dtype=str)
+    
+    # Expect columns: code, name, state_code, lga_code, custodian_code
+    required_cols = {'code', 'name', 'state_code', 'lga_code', 'custodian_code'}
+    if not required_cols.issubset(df.columns):
+        raise HTTPException(status_code=400, detail=f"Missing columns. Required: {required_cols}")
+
+    schools = []
+    for _, row in df.iterrows():
+        school = BECESchool(
+            code=str(row['code']),
+            name=str(row['name']),
+            state_code=str(row['state_code']),
+            lga_code=str(row['lga_code']),
+            custodian_code=str(row['custodian_code']),
+            status=str(row.get('status', 'active'))
+        )
+        schools.append(school)
+    
+    db.bulk_save_objects(schools)
+    db.commit()
+    return {"message": f"Successfully uploaded {len(schools)} BECE schools"}
 
 @router.post("/upload/states", status_code=status.HTTP_201_CREATED)
 async def upload_states(

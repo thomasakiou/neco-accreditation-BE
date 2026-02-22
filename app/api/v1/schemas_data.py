@@ -109,3 +109,32 @@ class SchoolUpdate(BaseModel):
 class School(SchoolBase):
     class Config:
         from_attributes = True
+
+# BECE School Schemas
+class BECESchoolBase(BaseModel):
+    code: str
+    name: str
+    state_code: str
+    lga_code: str
+    custodian_code: str
+    email: Optional[str] = None
+    accreditation_status: str = "Unaccredited"
+    accredited_date: Optional[str] = None
+    status: str = "active"
+
+class BECESchoolCreate(BECESchoolBase):
+    pass
+
+class BECESchoolUpdate(BaseModel):
+    name: Optional[str] = None
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    custodian_code: Optional[str] = None
+    email: Optional[str] = None
+    accreditation_status: Optional[str] = None
+    accredited_date: Optional[str] = None
+    status: Optional[str] = None
+
+class BECESchool(BECESchoolBase):
+    class Config:
+        from_attributes = True

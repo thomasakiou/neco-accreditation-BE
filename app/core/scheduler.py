@@ -4,7 +4,7 @@ from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 from app.infrastructure.database.session import SessionLocal
-from app.infrastructure.database.models import School, State, User, UserRole, AccreditationStatus
+from app.infrastructure.database.models import School, BECESchool, State, User, UserRole, AccreditationStatus
 from app.core.email_service import send_accreditation_alert
 from app.core.config import get_settings
 
@@ -13,10 +13,14 @@ settings = get_settings()
 def check_accreditation():
     db = SessionLocal()
     try:
-        schools = db.query(School).filter(School.accreditation_status == AccreditationStatus.ACCREDITED.value).all()
+        # Check both SSCE (School) and BECE (BECESchool)
+        models_to_check = [School, BECESchool]
         today = date.today()
         
-        for school in schools:
+        for model in models_to_check:
+            schools = db.query(model).filter(model.accreditation_status == AccreditationStatus.ACCREDITED.value).all()
+            
+            for school in schools:
             if not school.accredited_date:
                 continue
             
