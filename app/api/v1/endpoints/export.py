@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import School, User, UserRole, LGA, Custodian, State, BECESchool
 from app.core.auth import get_current_user
+from app.core.audit_logger import log_activity, AuditAction, AuditResource
 import pandas as pd
 import dbf
 import tempfile
@@ -17,7 +18,8 @@ router = APIRouter()
 async def export_schools(
     format: str = "excel", # excel, csv, dbf
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     query = select(School)
     if current_user.role == UserRole.STATE.value:
@@ -37,6 +39,12 @@ async def export_schools(
             "accrd_year": s.accrd_year,
             "status": s.status
         })
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.EXPORT, resource_type=AuditResource.SCHOOL, details=f"Exported {len(schools)} schools as {format}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
     
     if format == "csv":
         return export_to_csv(data, "schools")
@@ -142,7 +150,8 @@ async def export_custodians(
 async def export_bece_schools(
     format: str = "excel", # excel, csv, dbf
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     query = select(BECESchool)
     if current_user.role == UserRole.STATE.value:
@@ -162,6 +171,12 @@ async def export_bece_schools(
             "accrd_year": s.accrd_year,
             "status": s.status
         })
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.EXPORT, resource_type=AuditResource.BECE_SCHOOL, details=f"Exported {len(schools)} BECE schools as {format}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
     
     if format == "csv":
         return export_to_csv(data, "bece_schools")

@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, DateTime, Text
 from sqlalchemy.orm import relationship
 from app.infrastructure.database.session import Base
+from datetime import datetime
 import enum
 
 class UserRole(enum.Enum):
@@ -110,3 +111,17 @@ class BECESchool(Base):
     state = relationship("State", back_populates="bece_schools")
     lga = relationship("LGA", back_populates="bece_schools")
     custodian = relationship("Custodian", back_populates="bece_schools")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_role = Column(String, nullable=False)  # admin, hq, state, viewer
+    action = Column(String, nullable=False)  # CREATE, READ, UPDATE, DELETE, EXPORT, etc.
+    resource_type = Column(String, nullable=False)  # SCHOOL, STATE, CUSTODIAN, ZONE, LGA, etc.
+    resource_id = Column(String, nullable=True)  # ID of the resource
+    details = Column(Text, nullable=True)  # Additional details in JSON or text format
+    timestamp = Column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
+    ip_address = Column(String, nullable=True)  # Client IP address
+    
+    user = relationship("User", foreign_keys=[user_id])

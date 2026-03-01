@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,11 +7,12 @@ from app.infrastructure.database.models import User, UserRole
 from app.api.v1.schemas import Token, UserLogin
 from app.core.security import verify_password
 from app.core.auth import create_access_token, get_current_user, check_role
+from app.core.audit_logger import log_activity, AuditAction, AuditResource
 
 router = APIRouter()
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db), request: Request = None):
     result = await db.execute(select(User).filter(User.email == form_data.username))
     user = result.scalars().first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -22,6 +23,25 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         )
     
     access_token = create_access_token(data={"sub": user.email})
+    
+    # Log the login activity for non-admin users
+    if user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(
+                db=db,
+                user_id=user.id,
+                user_role=user.role,
+                action=AuditAction.LOGIN,
+                resource_type=AuditResource.USER,
+                resource_id=str(user.id),
+                details=f"User {user.email} logged in",
+                ip_address=request.client.host if request else None
+            )
+            await db.commit()
+        except Exception as e:
+            # Don't fail the login if audit logging fails
+            print(f"Error logging audit for login: {e}")
+    
     return {
         "access_token": access_token, 
         "token_type": "bearer",
@@ -29,7 +49,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     }
 
 @router.post("/login-json", response_model=Token)
-async def login_json(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
+async def login_json(user_data: UserLogin, db: AsyncSession = Depends(get_db), request: Request = None):
     result = await db.execute(select(User).filter(User.email == user_data.email))
     user = result.scalars().first()
     if not user or not verify_password(user_data.password, user.hashed_password):
@@ -40,6 +60,25 @@ async def login_json(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
         )
     
     access_token = create_access_token(data={"sub": user.email})
+    
+    # Log the login activity for non-admin users
+    if user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(
+                db=db,
+                user_id=user.id,
+                user_role=user.role,
+                action=AuditAction.LOGIN,
+                resource_type=AuditResource.USER,
+                resource_id=str(user.id),
+                details=f"User {user.email} logged in",
+                ip_address=request.client.host if request else None
+            )
+            await db.commit()
+        except Exception as e:
+            # Don't fail the login if audit logging fails
+            print(f"Error logging audit for login: {e}")
+    
     return {
         "access_token": access_token, 
         "token_type": "bearer",

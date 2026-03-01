@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import School, BECESchool, Custodian, State, LGA, Zone, User, UserRole
 from app.core.auth import check_role
+from app.core.audit_logger import log_activity, AuditAction, AuditResource
 from app.core.security import get_password_hash
 from app.core.config import get_settings
 import pandas as pd
@@ -16,7 +17,8 @@ settings = get_settings()
 async def upload_schools(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
 ):
     contents = await file.read()
     if file.filename.endswith('.csv'):
@@ -72,13 +74,21 @@ async def upload_schools(
             status_code=400,
             detail=f"Database error during upload: {str(e.__class__.__name__)}. This is usually caused by duplicate entries or invalid references."
         )
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.IMPORT, resource_type=AuditResource.SCHOOL, details=f"Imported {len(schools)} schools via file upload", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+    
     return {"message": f"Successfully uploaded {len(schools)} schools"}
 
 @router.post("/upload/bece-schools", status_code=status.HTTP_201_CREATED)
 async def upload_bece_schools(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
 ):
     contents = await file.read()
     if file.filename.endswith('.csv'):
@@ -134,6 +144,13 @@ async def upload_bece_schools(
             status_code=400,
             detail=f"Database error during upload: {str(e.__class__.__name__)}. This is usually caused by duplicate entries or invalid references."
         )
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.IMPORT, resource_type=AuditResource.BECE_SCHOOL, details=f"Imported {len(schools)} BECE schools via file upload", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+    
     return {"message": f"Successfully uploaded {len(schools)} BECE schools"}
 
 @router.post("/upload/states", status_code=status.HTTP_201_CREATED)
