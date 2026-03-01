@@ -20,7 +20,7 @@ class Zone(ZoneBase):
 class LGABase(BaseModel):
     code: str
     name: str
-    state_code: str
+    state_code: Optional[str] = None
 
 class LGACreate(LGABase):
     pass
@@ -62,9 +62,9 @@ class State(StateBase):
 class CustodianBase(BaseModel):
     code: str
     name: str
-    state_code: str
-    lga_code: str
-    town: str
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    town: Optional[str] = None
     status: str = "active"
 
 class CustodianCreate(CustodianBase):
@@ -85,16 +85,20 @@ class Custodian(CustodianBase):
 class SchoolBase(BaseModel):
     code: str
     name: str
-    state_code: str
-    lga_code: str
-    custodian_code: str
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
     accredited_date: Optional[str] = None
+    category: str = "PUB"
+    accrd_year: Optional[str] = None
+    payment_url: Optional[str] = None
     status: str = "active"
 
 class SchoolCreate(SchoolBase):
-    pass
+    state_code: str
+    custodian_code: str
 
 class SchoolUpdate(BaseModel):
     name: Optional[str] = None
@@ -104,6 +108,9 @@ class SchoolUpdate(BaseModel):
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
     accredited_date: Optional[str] = None
+    category: Optional[str] = None
+    accrd_year: Optional[str] = None
+    payment_url: Optional[str] = None
     status: Optional[str] = None
 
 class School(SchoolBase):
@@ -114,16 +121,20 @@ class School(SchoolBase):
 class BECESchoolBase(BaseModel):
     code: str
     name: str
-    state_code: str
-    lga_code: str
-    custodian_code: str
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
     accredited_date: Optional[str] = None
+    category: str = "PUB"
+    accrd_year: Optional[str] = None
+    payment_url: Optional[str] = None
     status: str = "active"
 
 class BECESchoolCreate(BECESchoolBase):
-    pass
+    state_code: str
+    custodian_code: str
 
 class BECESchoolUpdate(BaseModel):
     name: Optional[str] = None
@@ -133,6 +144,9 @@ class BECESchoolUpdate(BaseModel):
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
     accredited_date: Optional[str] = None
+    category: Optional[str] = None
+    accrd_year: Optional[str] = None
+    payment_url: Optional[str] = None
     status: Optional[str] = None
 
 class BECESchool(BECESchoolBase):

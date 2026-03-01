@@ -3,7 +3,8 @@ from typing import Optional, List
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.config import get_settings
 from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import User, UserRole
@@ -21,7 +22,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -35,7 +36,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     except JWTError:
         raise credentials_exception
     
-    user = db.query(User).filter(User.email == email).first()
+    result = await db.execute(select(User).filter(User.email == email))
+    user = result.scalars().first()
     if user is None:
         raise credentials_exception
     return user
@@ -50,7 +52,7 @@ def check_role(roles: List[UserRole]):
         return current_user
     return role_checker
 
-async def check_state_not_locked(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def check_state_not_locked(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
     Dependency that blocks write operations for state users whose state is locked.
     Admin and HQ users are never affected by the lock.
@@ -58,7 +60,8 @@ async def check_state_not_locked(current_user: User = Depends(get_current_user),
     from app.infrastructure.database.models import State as StateModel
     
     if current_user.role == UserRole.STATE.value and current_user.state_code:
-        state = db.query(StateModel).filter(StateModel.code == current_user.state_code).first()
+        result = await db.execute(select(StateModel).filter(StateModel.code == current_user.state_code))
+        state = result.scalars().first()
         if state and state.is_locked:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

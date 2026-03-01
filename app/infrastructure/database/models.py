@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, Enum, Boolean, Integer
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from app.infrastructure.database.session import Base
 import enum
@@ -7,23 +7,29 @@ class UserRole(enum.Enum):
     ADMIN = "admin"
     HQ = "hq"
     STATE = "state"
+    SCHOOL = "school"
+    VIEWER = "viewer"
+
+class AccreditationStatus(enum.Enum):
+    ACCREDITED = "Accredited"
+    UNACCREDITED = "Unaccredited"
+    PENDING = "Pending"
+    RE_ACCREDITATION = "Re-accreditation"
 
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    role = Column(String, default=UserRole.STATE.value)
+    role = Column(String) # admin, hq, state, school
     state_code = Column(String, ForeignKey("states.code"), nullable=True)
     is_active = Column(Boolean, default=True)
-
-    state = relationship("State", back_populates="users")
 
 class Zone(Base):
     __tablename__ = "zones"
     code = Column(String, primary_key=True, index=True)
     name = Column(String)
-
+    
     states = relationship("State", back_populates="zone")
 
 class State(Base):
@@ -33,7 +39,7 @@ class State(Base):
     capital = Column(String, nullable=True)
     email = Column(String, nullable=True)
     zone_code = Column(String, ForeignKey("zones.code"))
-    status = Column(String, default="active", server_default="active") # active/inactive
+    status = Column(String, default="active", server_default="active")
     is_locked = Column(Boolean, default=False, server_default="false")
 
     zone = relationship("Zone", back_populates="states")
@@ -41,13 +47,12 @@ class State(Base):
     custodians = relationship("Custodian", back_populates="state")
     schools = relationship("School", back_populates="state")
     bece_schools = relationship("BECESchool", back_populates="state")
-    users = relationship("User", back_populates="state")
 
 class LGA(Base):
     __tablename__ = "lgas"
     code = Column(String, primary_key=True, index=True)
     name = Column(String)
-    state_code = Column(String, ForeignKey("states.code"))
+    state_code = Column(String, ForeignKey("states.code"), nullable=False)
 
     state = relationship("State", back_populates="lgas")
     custodians = relationship("Custodian", back_populates="lga")
@@ -58,8 +63,8 @@ class Custodian(Base):
     __tablename__ = "custodians"
     code = Column(String, primary_key=True, index=True)
     name = Column(String)
-    state_code = Column(String, ForeignKey("states.code"))
-    lga_code = Column(String, ForeignKey("lgas.code"))
+    state_code = Column(String, ForeignKey("states.code"), nullable=True)
+    lga_code = Column(String, ForeignKey("lgas.code"), nullable=True)
     town = Column(String)
     status = Column(String, default="active", server_default="active")
 
@@ -67,10 +72,6 @@ class Custodian(Base):
     lga = relationship("LGA", back_populates="custodians")
     schools = relationship("School", back_populates="custodian")
     bece_schools = relationship("BECESchool", back_populates="custodian")
-
-class AccreditationStatus(enum.Enum):
-    ACCREDITED = "Accredited"
-    UNACCREDITED = "Unaccredited"
 
 class School(Base):
     __tablename__ = "schools"
@@ -82,6 +83,9 @@ class School(Base):
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
+    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV
+    accrd_year = Column(String, nullable=True)
+    payment_url = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="schools")
@@ -98,6 +102,9 @@ class BECESchool(Base):
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
+    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV
+    accrd_year = Column(String, nullable=True)
+    payment_url = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="bece_schools")

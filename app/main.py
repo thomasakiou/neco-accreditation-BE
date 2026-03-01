@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
+from fastapi.staticfiles import StaticFiles
 from app.api.v1.endpoints import auth, data, upload, export
+import os
+
+# Ensure payment-proof directory exists
+UPLOAD_DIR = "/root/neco-accreditation-BE/payment-proof"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
 
 settings = get_settings()
 
@@ -19,6 +26,9 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(data.router, prefix="/api/v1/data", tags=["Data Management"])
 app.include_router(upload.router, prefix="/api/v1/data", tags=["Bulk Import"])
 app.include_router(export.router, prefix="/api/v1/data", tags=["Data Export"])
+
+# Mount payment-proof directory
+app.mount("/payment-proof", StaticFiles(directory=UPLOAD_DIR), name="payment-proof")
 
 @app.get("/")
 async def root():
