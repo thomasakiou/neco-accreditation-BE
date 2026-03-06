@@ -6,7 +6,7 @@ from sqlalchemy import select
 from typing import List, Optional
 from pydantic import BaseModel
 from app.infrastructure.database.session import get_db
-from app.infrastructure.database.models import State, LGA, Zone, Custodian, School, BECESchool, User, UserRole
+from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECECustodian, School, BECESchool, User, UserRole
 from app.api.v1 import schemas_data as schemas
 from app.core.auth import get_current_user, check_role, check_state_not_locked
 from app.core.security import get_password_hash
@@ -558,6 +558,143 @@ async def delete_custodian(
         except: pass
     
     return None
+    
+# --- BECE Custodians ---
+@router.get("/bece-custodians", response_model=List[schemas.BECECustodian])
+async def get_bece_custodians(
+    state_code: Optional[str] = None,
+    lga_code: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None
+):
+    query = select(BECECustodian)
+    if current_user.role == UserRole.STATE.value:
+        query = query.filter(BECECustodian.state_code == current_user.state_code)
+    elif state_code:
+        query = query.filter(BECECustodian.state_code == state_code)
+    
+    if lga_code:
+        query = query.filter(BECECustodian.lga_code == lga_code)
+        
+    result = await db.execute(query)
+    return result.scalars().all()
+
+@router.get("/bece-custodians/{code}", response_model=schemas.BECECustodian)
+async def get_bece_custodian(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(BECECustodian).filter(BECECustodian.code == code))
+    custodian = result.scalars().first()
+    if not custodian:
+        raise HTTPException(status_code=404, detail="BECE Custodian not found")
+    
+    # RBAC: State user can only see custodians in their state
+    if current_user.role == UserRole.STATE.value and custodian.state_code != current_user.state_code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+        
+    return custodian
+
+@router.post("/bece-custodians", response_model=schemas.BECECustodian, dependencies=[Depends(check_state_not_locked)])
+async def create_bece_custodian(
+    custodian: schemas.BECECustodianCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    request: Request = None
+):
+    custodian_data = custodian.dict()
+    if current_user.role == UserRole.STATE.value:
+        custodian_data['state_code'] = current_user.state_code
+    for key in ['state_code', 'lga_code']:
+        val = custodian_data.get(key)
+        if val == "" or val == "null" or val == "undefined" or (isinstance(val, str) and not val.strip()):
+            custodian_data[key] = None
+        
+    db_custodian = BECECustodian(**custodian_data)
+    db.add(db_custodian)
+    await db.commit()
+    await db.refresh(db_custodian)
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.CREATE, resource_type=AuditResource.BECE_CUSTODIAN, resource_id=db_custodian.code, details=f"Created BECE custodian {db_custodian.name}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+    
+    return db_custodian
+
+@router.put("/bece-custodians/{code}", response_model=schemas.BECECustodian, dependencies=[Depends(check_state_not_locked)])
+async def update_bece_custodian(
+    code: str,
+    custodian_in: schemas.BECECustodianUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    request: Request = None
+):
+    result = await db.execute(select(BECECustodian).filter(BECECustodian.code == code))
+    db_custodian = result.scalars().first()
+    if not db_custodian:
+        raise HTTPException(status_code=404, detail="BECE Custodian not found")
+        
+    if current_user.role == UserRole.STATE.value and db_custodian.state_code != current_user.state_code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    update_data = custodian_in.dict(exclude_unset=True)
+    if current_user.role == UserRole.STATE.value and "state_code" in update_data:
+        del update_data["state_code"]
+    for field, value in update_data.items():
+        if field in ["state_code", "lga_code"]:
+            if value == "" or value == "null" or value == "undefined" or (isinstance(value, str) and not value.strip()):
+                value = None
+        setattr(db_custodian, field, value)
+    
+    db.add(db_custodian)
+    await db.commit()
+    await db.refresh(db_custodian)
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.UPDATE, resource_type=AuditResource.BECE_CUSTODIAN, resource_id=code, details=f"Updated BECE custodian {db_custodian.name}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+    
+    return db_custodian
+
+@router.delete("/bece-custodians/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
+async def delete_bece_custodian(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
+):
+    result = await db.execute(select(BECECustodian).filter(BECECustodian.code == code))
+    db_custodian = result.scalars().first()
+    if not db_custodian:
+        raise HTTPException(status_code=404, detail="BECE Custodian not found")
+    
+    custodian_name = db_custodian.name
+    await db.delete(db_custodian)
+    await db.commit()
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.DELETE, resource_type=AuditResource.BECE_CUSTODIAN, resource_id=code, details=f"Deleted BECE custodian {custodian_name}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+    
+    return None
+
+@router.delete("/bece-custodians/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_bece_custodians(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    from sqlalchemy import delete
+    await db.execute(delete(BECECustodian))
+    await db.commit()
+    return None
 
 # --- Schools ---
 @router.get("/schools", response_model=List[schemas.School])
@@ -695,6 +832,40 @@ async def update_school(
             await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.UPDATE, resource_type=AuditResource.SCHOOL, resource_id=code, details=f"Updated school {db_school.name}", ip_address=request.client.host if request else None)
             await db.commit()
         except: pass
+        
+    return db_school
+
+@router.post("/schools/{code}/approve", response_model=schemas.School)
+async def approve_school(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
+):
+    result = await db.execute(select(School).filter(School.code == code))
+    db_school = result.scalars().first()
+    if not db_school:
+        raise HTTPException(status_code=404, detail="School not found")
+    
+    db_school.approval_status = "Approved"
+    db.add(db_school)
+    await db.commit()
+    await db.refresh(db_school)
+    
+    try:
+        await log_activity(
+            db=db,
+            user_id=current_user.id,
+            user_role=current_user.role,
+            action=AuditAction.UPDATE,
+            resource_type=AuditResource.SCHOOL,
+            resource_id=code,
+            details=f"Approved school {db_school.name}",
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except Exception as e:
+        print(f"Error logging audit: {e}")
         
     return db_school
 
@@ -942,6 +1113,40 @@ async def update_bece_school(
         except: pass
         
     return db_school
+
+@router.post("/bece-schools/{code}/approve", response_model=schemas.BECESchool)
+async def approve_bece_school(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
+):
+    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    db_bece_school = result.scalars().first()
+    if not db_bece_school:
+        raise HTTPException(status_code=404, detail="BECE School not found")
+    
+    db_bece_school.approval_status = "Approved"
+    db.add(db_bece_school)
+    await db.commit()
+    await db.refresh(db_bece_school)
+    
+    try:
+        await log_activity(
+            db=db,
+            user_id=current_user.id,
+            user_role=current_user.role,
+            action=AuditAction.UPDATE,
+            resource_type=AuditResource.BECE_SCHOOL,
+            resource_id=code,
+            details=f"Approved BECE school {db_bece_school.name}",
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except Exception as e:
+        print(f"Error logging audit: {e}")
+        
+    return db_bece_school
 
 @router.delete("/bece-schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_bece_school(

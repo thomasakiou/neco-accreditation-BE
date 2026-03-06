@@ -52,6 +52,10 @@ async def upload_schools(
         if custodian_code and custodian_code.lower() != 'nan' and custodian_code not in existing_custodian_codes:
             raise HTTPException(status_code=400, detail=f"Custodian code {custodian_code} does not exist.")
 
+        category_val = str(row.get('category', 'PUB')).strip().upper()
+        if category_val not in ["PUB", "PRV", "FED"]:
+            raise HTTPException(status_code=400, detail=f"Invalid category '{category_val}' for school {str(row['code'])}. Allowed: PUB, PRV, FED.")
+
         school = School(
             code=str(row['code']),
             name=str(row['name']),
@@ -59,8 +63,9 @@ async def upload_schools(
             lga_code=lga_code if lga_code and lga_code.lower() != 'nan' else None,
             custodian_code=custodian_code if custodian_code and custodian_code.lower() != 'nan' else None,
             email=str(row.get('email', '')) if pd.notna(row.get('email')) else None,
-            category=str(row.get('category', 'PUB')).strip().upper(),
+            category=category_val,
             accrd_year=str(row.get('accrd_year', '')).strip() if pd.notna(row.get('accrd_year')) else None,
+            approval_status=str(row.get('approval_status', '')).strip() if pd.notna(row.get('approval_status')) else None,
             status=str(row.get('status', 'active'))
         )
         schools.append(school)
@@ -106,7 +111,8 @@ async def upload_bece_schools(
     existing_state_codes = set(result.scalars().all())
     result = await db.execute(select(LGA.code))
     existing_lga_codes = set(result.scalars().all())
-    result = await db.execute(select(Custodian.code))
+    from app.infrastructure.database.models import BECECustodian
+    result = await db.execute(select(BECECustodian.code))
     existing_custodian_codes = set(result.scalars().all())
 
     schools = []
@@ -122,6 +128,10 @@ async def upload_bece_schools(
         if custodian_code and custodian_code.lower() != 'nan' and custodian_code not in existing_custodian_codes:
             raise HTTPException(status_code=400, detail=f"Custodian code {custodian_code} does not exist.")
 
+        category_val = str(row.get('category', 'PUB')).strip().upper()
+        if category_val not in ["PUB", "PRV", "FED"]:
+            raise HTTPException(status_code=400, detail=f"Invalid category '{category_val}' for school {str(row['code'])}. Allowed: PUB, PRV, FED.")
+
         school = BECESchool(
             code=str(row['code']),
             name=str(row['name']),
@@ -129,8 +139,9 @@ async def upload_bece_schools(
             lga_code=lga_code if lga_code and lga_code.lower() != 'nan' else None,
             custodian_code=custodian_code if custodian_code and custodian_code.lower() != 'nan' else None,
             email=str(row.get('email', '')) if pd.notna(row.get('email')) else None,
-            category=str(row.get('category', 'PUB')).strip().upper(),
+            category=category_val,
             accrd_year=str(row.get('accrd_year', '')).strip() if pd.notna(row.get('accrd_year')) else None,
+            approval_status=str(row.get('approval_status', '')).strip() if pd.notna(row.get('approval_status')) else None,
             status=str(row.get('status', 'active'))
         )
         schools.append(school)
@@ -322,4 +333,60 @@ async def upload_custodians(
             detail=f"Database error during upload: {str(e.__class__.__name__)}. This is usually caused by duplicate entries or invalid references."
         )
     return {"message": f"Successfully uploaded {len(custodians)} custodians"}
+
+@router.post("/upload/bece-custodians", status_code=status.HTTP_201_CREATED)
+async def upload_bece_custodians(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    contents = await file.read()
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(io.BytesIO(contents), encoding_errors='ignore', dtype=str)
+    else:
+        df = pd.read_excel(io.BytesIO(contents), dtype=str)
+    
+    # Expect columns: code, name, state_code, lga_code, town
+    required_cols = {'code', 'name'}
+    if not required_cols.issubset(df.columns):
+        raise HTTPException(status_code=400, detail=f"Missing columns. Required: {required_cols}")
+
+    # Validate state and lga existence to avoid FK errors
+    result = await db.execute(select(State.code))
+    existing_state_codes = set(result.scalars().all())
+    
+    result = await db.execute(select(LGA.code))
+    existing_lga_codes = set(result.scalars().all())
+
+    from app.infrastructure.database.models import BECECustodian
+    custodians = []
+    for _, row in df.iterrows():
+        state_code = str(row.get('state_code', '')).strip() if pd.notna(row.get('state_code')) else None
+        lga_code = str(row.get('lga_code', '')).strip() if pd.notna(row.get('lga_code')) else None
+        
+        if state_code and state_code not in existing_state_codes:
+            raise HTTPException(status_code=400, detail=f"State code {state_code} does not exist.")
+        if lga_code and lga_code not in existing_lga_codes:
+            raise HTTPException(status_code=400, detail=f"LGA code {lga_code} does not exist.")
+
+        custodian = BECECustodian(
+            code=str(row['code']),
+            name=str(row['name']),
+            state_code=state_code if state_code else None,
+            lga_code=lga_code if lga_code else None,
+            town=str(row.get('town', '')) if pd.notna(row.get('town')) else "",
+            status=str(row.get('status', 'active'))
+        )
+        custodians.append(custodian)
+    
+    db.add_all(custodians)
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Database error during upload: {str(e.__class__.__name__)}. This is usually caused by duplicate entries or invalid references."
+        )
+    return {"message": f"Successfully uploaded {len(custodians)} BECE custodians"}
 

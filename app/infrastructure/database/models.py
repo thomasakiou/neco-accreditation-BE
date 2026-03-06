@@ -46,6 +46,7 @@ class State(Base):
     zone = relationship("Zone", back_populates="states")
     lgas = relationship("LGA", back_populates="state")
     custodians = relationship("Custodian", back_populates="state")
+    bece_custodians = relationship("BECECustodian", back_populates="state")
     schools = relationship("School", back_populates="state")
     bece_schools = relationship("BECESchool", back_populates="state")
 
@@ -57,6 +58,7 @@ class LGA(Base):
 
     state = relationship("State", back_populates="lgas")
     custodians = relationship("Custodian", back_populates="lga")
+    bece_custodians = relationship("BECECustodian", back_populates="lga")
     schools = relationship("School", back_populates="lga")
     bece_schools = relationship("BECESchool", back_populates="lga")
 
@@ -72,6 +74,18 @@ class Custodian(Base):
     state = relationship("State", back_populates="custodians")
     lga = relationship("LGA", back_populates="custodians")
     schools = relationship("School", back_populates="custodian")
+
+class BECECustodian(Base):
+    __tablename__ = "bece_custodians"
+    code = Column(String, primary_key=True, index=True)
+    name = Column(String)
+    state_code = Column(String, ForeignKey("states.code"), nullable=True)
+    lga_code = Column(String, ForeignKey("lgas.code"), nullable=True)
+    town = Column(String)
+    status = Column(String, default="active", server_default="active")
+
+    state = relationship("State", back_populates="bece_custodians")
+    lga = relationship("LGA", back_populates="bece_custodians")
     bece_schools = relationship("BECESchool", back_populates="custodian")
 
 class School(Base):
@@ -84,9 +98,10 @@ class School(Base):
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
-    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV
+    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     accrd_year = Column(String, nullable=True)
     payment_url = Column(String, nullable=True)
+    approval_status = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="schools")
@@ -99,18 +114,19 @@ class BECESchool(Base):
     name = Column(String)
     state_code = Column(String, ForeignKey("states.code"))
     lga_code = Column(String, ForeignKey("lgas.code"))
-    custodian_code = Column(String, ForeignKey("custodians.code"))
+    custodian_code = Column(String, ForeignKey("bece_custodians.code"))
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
-    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV
+    category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     accrd_year = Column(String, nullable=True)
     payment_url = Column(String, nullable=True)
+    approval_status = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="bece_schools")
     lga = relationship("LGA", back_populates="bece_schools")
-    custodian = relationship("Custodian", back_populates="bece_schools")
+    custodian = relationship("BECECustodian", back_populates="bece_schools")
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

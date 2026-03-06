@@ -63,6 +63,7 @@ class AuditResource:
     SCHOOL = "SCHOOL"
     STATE = "STATE"
     CUSTODIAN = "CUSTODIAN"
+    BECE_CUSTODIAN = "BECE_CUSTODIAN"
     ZONE = "ZONE"
     LGA = "LGA"
     BECE_SCHOOL = "BECE_SCHOOL"

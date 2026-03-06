@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 # Zone Schemas
 class ZoneBase(BaseModel):
@@ -81,6 +81,29 @@ class Custodian(CustodianBase):
     class Config:
         from_attributes = True
 
+# BECE Custodian Schemas
+class BECECustodianBase(BaseModel):
+    code: str
+    name: str
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    town: Optional[str] = None
+    status: str = "active"
+
+class BECECustodianCreate(BECECustodianBase):
+    pass
+
+class BECECustodianUpdate(BaseModel):
+    name: Optional[str] = None
+    state_code: Optional[str] = None
+    lga_code: Optional[str] = None
+    town: Optional[str] = None
+    status: Optional[str] = None
+
+class BECECustodian(BECECustodianBase):
+    class Config:
+        from_attributes = True
+
 # School Schemas
 class SchoolBase(BaseModel):
     code: str
@@ -91,9 +114,10 @@ class SchoolBase(BaseModel):
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
     accredited_date: Optional[str] = None
-    category: str = "PUB"
+    category: Literal["PUB", "PRV", "FED"] = "PUB"
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
+    approval_status: Optional[str] = None
     status: str = "active"
 
 class SchoolCreate(SchoolBase):
@@ -108,9 +132,10 @@ class SchoolUpdate(BaseModel):
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
     accredited_date: Optional[str] = None
-    category: Optional[str] = None
+    category: Optional[Literal["PUB", "PRV", "FED"]] = None
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
+    approval_status: Optional[str] = None
     status: Optional[str] = None
 
 class School(SchoolBase):
@@ -127,9 +152,10 @@ class BECESchoolBase(BaseModel):
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
     accredited_date: Optional[str] = None
-    category: str = "PUB"
+    category: Literal["PUB", "PRV", "FED"] = "PUB"
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
+    approval_status: Optional[str] = None
     status: str = "active"
 
 class BECESchoolCreate(BECESchoolBase):
@@ -144,9 +170,10 @@ class BECESchoolUpdate(BaseModel):
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
     accredited_date: Optional[str] = None
-    category: Optional[str] = None
+    category: Optional[Literal["PUB", "PRV", "FED"]] = None
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
+    approval_status: Optional[str] = None
     status: Optional[str] = None
 
 class BECESchool(BECESchoolBase):

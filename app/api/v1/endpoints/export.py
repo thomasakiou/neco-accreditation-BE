@@ -37,6 +37,7 @@ async def export_schools(
             "custodian_code": s.custodian_code,
             "category": s.category,
             "accrd_year": s.accrd_year,
+            "approval_status": s.approval_status,
             "status": s.status
         })
     
@@ -146,6 +147,55 @@ async def export_custodians(
         
     return export_to_excel(data, "custodians")
 
+@router.get("/export/bece-custodians")
+async def export_bece_custodians(
+    format: str = "excel", # excel, csv, dbf
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None
+):
+    from app.infrastructure.database.models import BECECustodian
+    query = select(BECECustodian)
+    if current_user.role == UserRole.STATE.value:
+        query = query.filter(BECECustodian.state_code == current_user.state_code)
+    
+    result = await db.execute(query)
+    custodians = result.scalars().all()
+    data = []
+    for c in custodians:
+        data.append({
+            "code": c.code,
+            "name": c.name,
+            "state_code": c.state_code,
+            "lga_code": c.lga_code,
+            "town": c.town,
+            "status": c.status
+        })
+    
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+            await log_activity(db=db, user_id=current_user.id, user_role=current_user.role, action=AuditAction.EXPORT, resource_type=AuditResource.BECE_CUSTODIAN, details=f"Exported {len(custodians)} BECE custodians as {format}", ip_address=request.client.host if request else None)
+            await db.commit()
+        except: pass
+
+    if format == "csv":
+        return export_to_csv(data, "bece_custodians")
+    elif format == "dbf":
+        dbf_data = []
+        for d in data:
+            dbf_data.append({
+                "code": d["code"],
+                "name": d["name"],
+                "st_code": d["state_code"],
+                "lga_code": d["lga_code"],
+                "town": d["town"],
+                "status": d["status"]
+            })
+        schema = "code C(10); name C(254); st_code C(10); lga_code C(10); town C(254); status C(10)"
+        return export_to_dbf(dbf_data, "bece_custodians", schema)
+        
+    return export_to_excel(data, "bece_custodians")
+
 @router.get("/export/bece-schools")
 async def export_bece_schools(
     format: str = "excel", # excel, csv, dbf
@@ -169,6 +219,7 @@ async def export_bece_schools(
             "custodian_code": s.custodian_code,
             "category": s.category,
             "accrd_year": s.accrd_year,
+            "approval_status": s.approval_status,
             "status": s.status
         })
     
