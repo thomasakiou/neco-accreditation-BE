@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 import os
 import shutil
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import List, Optional
 from pydantic import BaseModel
 from app.infrastructure.database.session import get_db
@@ -18,26 +18,28 @@ router = APIRouter()
 
 # --- Helper: Auto-create or update user for a state email ---
 async def _create_or_update_state_user(db: AsyncSession, state_code: str, state_name: str, email: str, background_tasks: BackgroundTasks):
-    """Create a user for the state email if it doesn't exist, or update the existing one."""
+    """Create a user for the state email if it doesn't exist, or update/reset the existing one."""
     result = await db.execute(select(User).filter(User.email == email))
     existing_user = result.scalars().first()
-    if existing_user:
-        # Update existing user's state_code if needed
-        existing_user.state_code = state_code
-        db.add(existing_user)
-        return None  # No new password generated
     
     # Generate a random 8-digit password
     password = generate_password(8)
     
-    new_user = User(
-        email=email,
-        hashed_password=get_password_hash(password),
-        role=UserRole.STATE.value,
-        state_code=state_code,
-        is_active=True,
-    )
-    db.add(new_user)
+    if existing_user:
+        # Update existing user's state_code and reset password
+        existing_user.state_code = state_code
+        existing_user.hashed_password = get_password_hash(password)
+        db.add(existing_user)
+    else:
+        # Create new user
+        new_user = User(
+            email=email,
+            hashed_password=get_password_hash(password),
+            role=UserRole.STATE.value,
+            state_code=state_code,
+            is_active=True,
+        )
+        db.add(new_user)
     
     # Send credentials via email in the background
     background_tasks.add_task(send_credentials_email, email, password, state_name)
@@ -117,15 +119,19 @@ async def create_state(
     
     return db_state
 
-@router.put("/states/{code}", response_model=schemas.State)
+@router.put("/states/{code}", response_model=schemas.State, dependencies=[Depends(check_state_not_locked)])
 async def update_state(
     code: str,
     state_in: schemas.StateUpdate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
     request: Request = None
 ):
+    # RBAC: State user can only update their own state
+    if current_user.role == UserRole.STATE.value and current_user.state_code != code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+        
     result = await db.execute(select(State).filter(State.code == code))
     db_state = result.scalars().first()
     if not db_state:
@@ -134,6 +140,11 @@ async def update_state(
     old_email = db_state.email
     
     update_data = state_in.dict(exclude_unset=True)
+    
+    # Security: State users cannot lock/unlock states
+    if current_user.role == UserRole.STATE.value:
+        update_data.pop("is_locked", None)
+        
     for field, value in update_data.items():
         setattr(db_state, field, value)
     
@@ -702,6 +713,7 @@ async def get_schools(
     state_code: Optional[str] = None,
     lga_code: Optional[str] = None,
     custodian_code: Optional[str] = None,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     request: Request = None
@@ -718,17 +730,37 @@ async def get_schools(
         query = query.filter(School.lga_code == lga_code)
     if custodian_code:
         query = query.filter(School.custodian_code == custodian_code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
         
     result = await db.execute(query)
     return result.scalars().all()
 
+@router.delete("/schools/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_schools(
+    accrd_year: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    from sqlalchemy import delete
+    stmt = delete(School)
+    if accrd_year:
+        stmt = stmt.where(School.accrd_year == accrd_year)
+    await db.execute(stmt)
+    await db.commit()
+    return None
+
 @router.get("/schools/{code}", response_model=schemas.School)
 async def get_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(School).filter(School.code == code))
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    result = await db.execute(query)
     school = result.scalars().first()
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -784,11 +816,15 @@ async def update_school(
     code: str,
     school_in: schemas.SchoolUpdate,
     background_tasks: BackgroundTasks,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
     request: Request = None
 ):
-    result = await db.execute(select(School).filter(School.code == code))
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -838,11 +874,15 @@ async def update_school(
 @router.post("/schools/{code}/approve", response_model=schemas.School)
 async def approve_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
 ):
-    result = await db.execute(select(School).filter(School.code == code))
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -872,11 +912,15 @@ async def approve_school(
 @router.delete("/schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
 ):
-    result = await db.execute(select(School).filter(School.code == code))
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -897,11 +941,15 @@ async def delete_school(
 async def upload_school_payment_proof(
     code: str,
     file: UploadFile = File(...),
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
     dependencies=[Depends(check_state_not_locked)]
 ):
-    result = await db.execute(select(School).filter(School.code == code))
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    result = await db.execute(query)
     school = result.scalars().first()
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -926,11 +974,15 @@ async def upload_school_payment_proof(
 async def upload_bece_school_payment_proof(
     code: str,
     file: UploadFile = File(...),
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
     dependencies=[Depends(check_state_not_locked)]
 ):
-    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    result = await db.execute(query)
     school = result.scalars().first()
     if not school:
         raise HTTPException(status_code=404, detail="BECE School not found")
@@ -953,16 +1005,6 @@ async def upload_bece_school_payment_proof(
 
 
 # --- Delete All (Admin/HQ only) ---
-@router.delete("/schools/all", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_schools(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
-):
-    from sqlalchemy import delete
-    await db.execute(delete(School))
-    await db.commit()
-    return None
-
 @router.delete("/custodians/all", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_all_custodians(
     db: AsyncSession = Depends(get_db),
@@ -989,6 +1031,7 @@ async def get_bece_schools(
     state_code: Optional[str] = None,
     lga_code: Optional[str] = None,
     custodian_code: Optional[str] = None,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     request: Request = None
@@ -1003,17 +1046,37 @@ async def get_bece_schools(
         query = query.filter(BECESchool.lga_code == lga_code)
     if custodian_code:
         query = query.filter(BECESchool.custodian_code == custodian_code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
         
     result = await db.execute(query)
     return result.scalars().all()
 
+@router.delete("/bece-schools/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_bece_schools(
+    accrd_year: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
+):
+    from sqlalchemy import delete
+    stmt = delete(BECESchool)
+    if accrd_year:
+        stmt = stmt.where(BECESchool.accrd_year == accrd_year)
+    await db.execute(stmt)
+    await db.commit()
+    return None
+
 @router.get("/bece-schools/{code}", response_model=schemas.BECESchool)
 async def get_bece_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    result = await db.execute(query)
     school = result.scalars().first()
     if not school:
         raise HTTPException(status_code=404, detail="BECE School not found")
@@ -1067,11 +1130,15 @@ async def update_bece_school(
     code: str,
     school_in: schemas.BECESchoolUpdate,
     background_tasks: BackgroundTasks,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
     request: Request = None
 ):
-    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
         raise HTTPException(status_code=404, detail="BECE School not found")
@@ -1117,11 +1184,15 @@ async def update_bece_school(
 @router.post("/bece-schools/{code}/approve", response_model=schemas.BECESchool)
 async def approve_bece_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
 ):
-    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_bece_school = result.scalars().first()
     if not db_bece_school:
         raise HTTPException(status_code=404, detail="BECE School not found")
@@ -1151,11 +1222,15 @@ async def approve_bece_school(
 @router.delete("/bece-schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_bece_school(
     code: str,
+    accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
 ):
-    result = await db.execute(select(BECESchool).filter(BECESchool.code == code))
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
         raise HTTPException(status_code=404, detail="BECE School not found")
@@ -1172,21 +1247,6 @@ async def delete_bece_school(
     
     return None
 
-@router.delete("/bece-schools/all", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_bece_schools(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
-):
-    from sqlalchemy import delete
-    await db.execute(delete(BECESchool))
-    await db.commit()
-    return None
-
-@router.delete("/states/all", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_states(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ]))
-):
     from sqlalchemy import delete
     await db.execute(delete(User).filter(User.role == UserRole.STATE.value)) # Delete associated state users too
     from sqlalchemy import delete
@@ -1203,3 +1263,109 @@ async def delete_all_zones(
     await db.execute(delete(Zone))
     await db.commit()
     return None
+
+# --- Duplicate Schools for New Year ---
+@router.post("/schools/duplicate-for-year", response_model=schemas.DuplicateForYearResponse)
+async def duplicate_schools_for_year(
+    body: schemas.DuplicateForYearRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN])),
+    request: Request = None
+):
+    """
+    Duplicate all school and BECE school records for a new accreditation year.
+    Copies all rows from the most recent year and sets accrd_year to the new year.
+    """
+    target_year = body.year.strip()
+    if not target_year:
+        raise HTTPException(status_code=400, detail="Year cannot be empty")
+
+    # Check if data already exists for the target year
+    existing_schools = await db.execute(
+        select(School).filter(School.accrd_year == target_year).limit(1)
+    )
+    if existing_schools.scalars().first():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schools data for year {target_year} already exists. Delete it first or choose a different year."
+        )
+
+    existing_bece = await db.execute(
+        select(BECESchool).filter(BECESchool.accrd_year == target_year).limit(1)
+    )
+    if existing_bece.scalars().first():
+        raise HTTPException(
+            status_code=400,
+            detail=f"BECE Schools data for year {target_year} already exists. Delete it first or choose a different year."
+        )
+
+    # Find the most recent year to copy from
+    latest_school_year = await db.execute(
+        text("SELECT DISTINCT accrd_year FROM schools ORDER BY accrd_year DESC LIMIT 1")
+    )
+    source_school_year = latest_school_year.scalar()
+
+    latest_bece_year = await db.execute(
+        text("SELECT DISTINCT accrd_year FROM bece_schools ORDER BY accrd_year DESC LIMIT 1")
+    )
+    source_bece_year = latest_bece_year.scalar()
+
+    schools_count = 0
+    bece_count = 0
+
+    # Duplicate schools
+    if source_school_year:
+        result = await db.execute(
+            text("""
+                INSERT INTO schools (code, accrd_year, name, state_code, lga_code, custodian_code,
+                    email, accreditation_status, accredited_date, category,
+                    payment_url, approval_status, status)
+                SELECT code, :target_year, name, state_code, lga_code, custodian_code,
+                    email, accreditation_status, accredited_date, category,
+                    payment_url, approval_status, status
+                FROM schools
+                WHERE accrd_year = :source_year
+            """),
+            {"target_year": target_year, "source_year": source_school_year}
+        )
+        schools_count = result.rowcount
+
+    # Duplicate BECE schools
+    if source_bece_year:
+        result = await db.execute(
+            text("""
+                INSERT INTO bece_schools (code, accrd_year, name, state_code, lga_code, custodian_code,
+                    email, accreditation_status, accredited_date, category,
+                    payment_url, approval_status, status)
+                SELECT code, :target_year, name, state_code, lga_code, custodian_code,
+                    email, accreditation_status, accredited_date, category,
+                    payment_url, approval_status, status
+                FROM bece_schools
+                WHERE accrd_year = :source_year
+            """),
+            {"target_year": target_year, "source_year": source_bece_year}
+        )
+        bece_count = result.rowcount
+
+    await db.commit()
+
+    # Audit log
+    try:
+        await log_activity(
+            db=db,
+            user_id=current_user.id,
+            user_role=current_user.role,
+            action=AuditAction.CREATE,
+            resource_type=AuditResource.SCHOOL,
+            details=f"Duplicated {schools_count} schools and {bece_count} BECE schools for year {target_year}",
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    return schemas.DuplicateForYearResponse(
+        message=f"Successfully duplicated data for year {target_year}",
+        schools_duplicated=schools_count,
+        bece_schools_duplicated=bece_count
+    )

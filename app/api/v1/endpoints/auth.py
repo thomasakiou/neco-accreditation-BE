@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import User, UserRole
-from app.api.v1.schemas import Token, UserLogin
-from app.core.security import verify_password
+from app.api.v1.schemas import Token, UserLogin, UserChangePassword
+from app.core.security import verify_password, get_password_hash
 from app.core.auth import create_access_token, get_current_user, check_role
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
 
@@ -109,3 +109,37 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "state_code": current_user.state_code
     }
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+async def change_password(
+    password_data: UserChangePassword,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None
+):
+    if not verify_password(password_data.old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect old password"
+        )
+    
+    current_user.hashed_password = get_password_hash(password_data.new_password)
+    db.add(current_user)
+    
+    try:
+        await log_activity(
+            db=db,
+            user_id=current_user.id,
+            user_role=current_user.role,
+            action=AuditAction.UPDATE,
+            resource_type=AuditResource.USER,
+            resource_id=str(current_user.id),
+            details=f"User {current_user.email} changed their password",
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except Exception as e:
+        print(f"Error logging audit for password change: {e}")
+        await db.commit()
+        
+    return {"message": "Password changed successfully"}

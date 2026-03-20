@@ -17,6 +17,7 @@ router = APIRouter()
 @router.get("/export/schools")
 async def export_schools(
     format: str = "excel", # excel, csv, dbf
+    accrd_year: str = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     request: Request = None
@@ -24,6 +25,8 @@ async def export_schools(
     query = select(School)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(School.state_code == current_user.state_code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
     
     result = await db.execute(query)
     schools = result.scalars().all()
@@ -80,7 +83,7 @@ async def export_states(
     
     result = await db.execute(query)
     states = result.scalars().all()
-    data = [{"code": s.code, "name": s.name, "capital": s.capital, "zone_code": s.zone_code, "status": s.status} for s in states]
+    data = [{"code": s.code, "name": s.name, "capital": s.capital, "email": s.email, "ministry_email": s.ministry_email, "zone_code": s.zone_code, "status": s.status} for s in states]
     return export_to_excel(data, "states")
 
 @router.get("/export/lgas")
@@ -199,6 +202,7 @@ async def export_bece_custodians(
 @router.get("/export/bece-schools")
 async def export_bece_schools(
     format: str = "excel", # excel, csv, dbf
+    accrd_year: str = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     request: Request = None
@@ -206,6 +210,8 @@ async def export_bece_schools(
     query = select(BECESchool)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(BECESchool.state_code == current_user.state_code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
     
     result = await db.execute(query)
     schools = result.scalars().all()

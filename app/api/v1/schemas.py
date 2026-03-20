@@ -59,3 +59,7 @@ class DeleteResponse(BaseModel):
     message: str
     deleted_count: int
 
+class UserChangePassword(BaseModel):
+    old_password: str
+    new_password: str
+

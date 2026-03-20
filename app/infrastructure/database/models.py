@@ -39,6 +39,7 @@ class State(Base):
     name = Column(String)
     capital = Column(String, nullable=True)
     email = Column(String, nullable=True)
+    ministry_email = Column(String, nullable=True)
     zone_code = Column(String, ForeignKey("zones.code"))
     status = Column(String, default="active", server_default="active")
     is_locked = Column(Boolean, default=False, server_default="false")
@@ -91,6 +92,7 @@ class BECECustodian(Base):
 class School(Base):
     __tablename__ = "schools"
     code = Column(String, primary_key=True, index=True)
+    accrd_year = Column(String, primary_key=True, nullable=False, default="2025", server_default="2025")
     name = Column(String)
     state_code = Column(String, ForeignKey("states.code"))
     lga_code = Column(String, ForeignKey("lgas.code"))
@@ -99,7 +101,6 @@ class School(Base):
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
-    accrd_year = Column(String, nullable=True)
     payment_url = Column(String, nullable=True)
     approval_status = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
@@ -111,6 +112,7 @@ class School(Base):
 class BECESchool(Base):
     __tablename__ = "bece_schools"
     code = Column(String, primary_key=True, index=True)
+    accrd_year = Column(String, primary_key=True, nullable=False, default="2025", server_default="2025")
     name = Column(String)
     state_code = Column(String, ForeignKey("states.code"))
     lga_code = Column(String, ForeignKey("lgas.code"))
@@ -119,7 +121,6 @@ class BECESchool(Base):
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
     accredited_date = Column(String, nullable=True) # ISO format date
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
-    accrd_year = Column(String, nullable=True)
     payment_url = Column(String, nullable=True)
     approval_status = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")

@@ -39,6 +39,7 @@ class StateBase(BaseModel):
     name: str
     capital: Optional[str] = None
     email: Optional[str] = None
+    ministry_email: Optional[str] = None
     zone_code: str
     status: str = "active"
     is_locked: bool = False
@@ -50,6 +51,7 @@ class StateUpdate(BaseModel):
     name: Optional[str] = None
     capital: Optional[str] = None
     email: Optional[str] = None
+    ministry_email: Optional[str] = None
     zone_code: Optional[str] = None
     status: Optional[str] = None
     is_locked: Optional[bool] = None
@@ -179,3 +181,12 @@ class BECESchoolUpdate(BaseModel):
 class BECESchool(BECESchoolBase):
     class Config:
         from_attributes = True
+
+# Duplicate For Year Schemas
+class DuplicateForYearRequest(BaseModel):
+    year: str
+
+class DuplicateForYearResponse(BaseModel):
+    message: str
+    schools_duplicated: int
+    bece_schools_duplicated: int
