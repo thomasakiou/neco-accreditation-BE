@@ -17,6 +17,11 @@ class AccreditationStatus(enum.Enum):
     PENDING = "Pending"
     RE_ACCREDITATION = "Re-accreditation"
 
+class AccreditationType(enum.Enum):
+    FRESH = "Fresh-Accreditation"
+    RE = "Re-Accreditation"
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -99,6 +104,7 @@ class School(Base):
     custodian_code = Column(String, ForeignKey("custodians.code"))
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
+    accreditation_type = Column(String, nullable=True, default=AccreditationType.RE.value, server_default=AccreditationType.RE.value) # Fresh-Accreditation or Re-Accreditation
     accredited_date = Column(String, nullable=True) # ISO format date
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     payment_url = Column(String, nullable=True)
@@ -119,6 +125,7 @@ class BECESchool(Base):
     custodian_code = Column(String, ForeignKey("bece_custodians.code"))
     email = Column(String, nullable=True)
     accreditation_status = Column(String, default=AccreditationStatus.UNACCREDITED.value, server_default=AccreditationStatus.UNACCREDITED.value)
+    accreditation_type = Column(String, nullable=True, default=AccreditationType.RE.value, server_default=AccreditationType.RE.value) # Fresh-Accreditation or Re-Accreditation
     accredited_date = Column(String, nullable=True) # ISO format date
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     payment_url = Column(String, nullable=True)

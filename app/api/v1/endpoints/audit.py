@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import AuditLog, User, UserRole
 from app.api.v1.schemas import AuditLogResponse, DeleteResponse
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, check_super_admin
 
 router = APIRouter()
 
@@ -51,7 +51,7 @@ async def create_audit_log(
 
 @router.get("/audit-logs", response_model=List[AuditLogResponse])
 async def get_audit_logs(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db),
     user_id: Optional[int] = Query(None),
     action: Optional[str] = Query(None),
@@ -71,13 +71,8 @@ async def get_audit_logs(
     - limit: Maximum records to return (default: 100)
     - offset: Pagination offset (default: 0)
     """
-    # Allow admin, HQ, and state users to view audit logs
-    allowed_roles = [UserRole.ADMIN.value, UserRole.HQ.value, UserRole.STATE.value]
-    if current_user.role not in allowed_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins, HQ, and state users can view audit logs"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     # Build the query
     query = select(AuditLog)
@@ -108,7 +103,7 @@ async def get_audit_logs(
 
 @router.get("/audit-logs/summary", response_model=dict)
 async def get_audit_logs_summary(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db),
     days: Optional[int] = Query(7, description="Number of days to look back")
 ):
@@ -121,13 +116,8 @@ async def get_audit_logs_summary(
     - Activities by action type
     - Activities by resource type
     """
-    # Allow admin, HQ, and state users to view audit logs summary
-    allowed_roles = [UserRole.ADMIN.value, UserRole.HQ.value, UserRole.STATE.value]
-    if current_user.role not in allowed_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins, HQ, and state users can view audit logs summary"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     cutoff_date = datetime.utcnow() - timedelta(days=days)
     
@@ -166,7 +156,7 @@ async def get_audit_logs_summary(
 @router.get("/audit-logs/{user_id}", response_model=List[AuditLogResponse])
 async def get_user_audit_logs(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db),
     days: Optional[int] = Query(30, description="Number of days to look back"),
     limit: Optional[int] = Query(50, description="Maximum number of records to return")
@@ -177,13 +167,8 @@ async def get_user_audit_logs(
     Path parameters:
     - user_id: The ID of the user whose activities to retrieve
     """
-    # Allow admin, HQ, and state users to view audit logs
-    allowed_roles = [UserRole.ADMIN.value, UserRole.HQ.value, UserRole.STATE.value]
-    if current_user.role not in allowed_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins, HQ, and state users can view audit logs"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     # Verify user exists
     user_check = await db.execute(select(User).where(User.id == user_id))
@@ -212,7 +197,7 @@ async def get_user_audit_logs(
 @router.delete("/audit-logs/{log_id}", response_model=DeleteResponse)
 async def delete_audit_log(
     log_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -221,12 +206,8 @@ async def delete_audit_log(
     Path parameters:
     - log_id: The ID of the audit log to delete
     """
-    # Only admin users can delete audit logs
-    if current_user.role != UserRole.ADMIN.value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete audit logs"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     # Check if log exists
     result = await db.execute(select(AuditLog).where(AuditLog.id == log_id))
@@ -250,7 +231,7 @@ async def delete_audit_log(
 @router.delete("/audit-logs/bulk/delete", response_model=DeleteResponse)
 async def bulk_delete_audit_logs_by_ids(
     request: BulkDeleteRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -261,12 +242,8 @@ async def bulk_delete_audit_logs_by_ids(
       "log_ids": [1, 2, 3, 4, 5]
     }
     """
-    # Only admin users can delete audit logs
-    if current_user.role != UserRole.ADMIN.value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete audit logs"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     if not request.log_ids:
         raise HTTPException(
@@ -289,7 +266,7 @@ async def bulk_delete_audit_logs_by_ids(
 @router.delete("/audit-logs/bulk/by-filters", response_model=DeleteResponse)
 async def bulk_delete_audit_logs_by_filters(
     request: BulkDeleteByFiltersRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(check_super_admin()),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -305,12 +282,8 @@ async def bulk_delete_audit_logs_by_filters(
     
     All filters are optional. If days is specified, only logs older than that many days are deleted.
     """
-    # Only admin users can delete audit logs
-    if current_user.role != UserRole.ADMIN.value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete audit logs"
-        )
+    # Restrict to super admin via dependency
+    pass
     
     # Build the delete query
     filters = []

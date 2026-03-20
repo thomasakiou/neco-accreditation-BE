@@ -52,6 +52,17 @@ def check_role(roles: List[UserRole]):
         return current_user
     return role_checker
 
+def check_super_admin():
+    async def super_admin_checker(current_user: User = Depends(get_current_user)):
+        # Only the designated admin email has full access
+        if current_user.email != settings.ADMIN_EMAIL:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This action is restricted to the super administrator only"
+            )
+        return current_user
+    return super_admin_checker
+
 async def check_state_not_locked(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
     Dependency that blocks write operations for state users whose state is locked.

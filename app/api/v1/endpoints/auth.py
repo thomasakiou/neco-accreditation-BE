@@ -6,7 +6,7 @@ from app.infrastructure.database.session import get_db
 from app.infrastructure.database.models import User, UserRole
 from app.api.v1.schemas import Token, UserLogin, UserChangePassword
 from app.core.security import verify_password, get_password_hash
-from app.core.auth import create_access_token, get_current_user, check_role
+from app.core.auth import create_access_token, get_current_user, check_role, check_super_admin
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
 
 router = APIRouter()
@@ -90,7 +90,7 @@ async def reset_password(
     email: str, 
     new_password: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN]))
+    current_user: User = Depends(check_super_admin())
 ):
     result = await db.execute(select(User).filter(User.email == email))
     user = result.scalars().first()

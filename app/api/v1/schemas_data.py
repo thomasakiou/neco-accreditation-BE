@@ -115,6 +115,7 @@ class SchoolBase(BaseModel):
     custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
+    accreditation_type: Optional[str] = None
     accredited_date: Optional[str] = None
     category: Literal["PUB", "PRV", "FED"] = "PUB"
     accrd_year: Optional[str] = None
@@ -133,6 +134,7 @@ class SchoolUpdate(BaseModel):
     custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
+    accreditation_type: Optional[str] = None
     accredited_date: Optional[str] = None
     category: Optional[Literal["PUB", "PRV", "FED"]] = None
     accrd_year: Optional[str] = None
@@ -153,6 +155,7 @@ class BECESchoolBase(BaseModel):
     custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: str = "Unaccredited"
+    accreditation_type: Optional[str] = None
     accredited_date: Optional[str] = None
     category: Literal["PUB", "PRV", "FED"] = "PUB"
     accrd_year: Optional[str] = None
@@ -171,6 +174,7 @@ class BECESchoolUpdate(BaseModel):
     custodian_code: Optional[str] = None
     email: Optional[str] = None
     accreditation_status: Optional[str] = None
+    accreditation_type: Optional[str] = None
     accredited_date: Optional[str] = None
     category: Optional[Literal["PUB", "PRV", "FED"]] = None
     accrd_year: Optional[str] = None

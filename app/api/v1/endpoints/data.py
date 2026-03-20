@@ -6,9 +6,9 @@ from sqlalchemy import select, text
 from typing import List, Optional
 from pydantic import BaseModel
 from app.infrastructure.database.session import get_db
-from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECECustodian, School, BECESchool, User, UserRole
+from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECECustodian, School, BECESchool, User, UserRole, AccreditationType
 from app.api.v1 import schemas_data as schemas
-from app.core.auth import get_current_user, check_role, check_state_not_locked
+from app.core.auth import get_current_user, check_role, check_state_not_locked, check_super_admin
 from app.core.security import get_password_hash
 from app.core.email_service import generate_password, send_credentials_email
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
@@ -144,6 +144,16 @@ async def update_state(
     # Security: State users cannot lock/unlock states
     if current_user.role == UserRole.STATE.value:
         update_data.pop("is_locked", None)
+    
+    # Security: Only super admin can change state email (Reset Password)
+    from app.core.config import get_settings
+    settings = get_settings()
+    if update_data.get("email") and update_data.get("email") != old_email:
+        if current_user.email != settings.ADMIN_EMAIL:
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the super administrator can update state email addresses (Password Reset)"
+            )
         
     for field, value in update_data.items():
         setattr(db_state, field, value)
@@ -199,7 +209,7 @@ class LockRequest(BaseModel):
 async def lock_states(
     request: LockRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN]))
+    current_user: User = Depends(check_super_admin())
 ):
     if request.state_code:
         result = await db.execute(select(State).filter(State.code == request.state_code))
@@ -222,7 +232,7 @@ async def lock_states(
 async def unlock_states(
     request: LockRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN]))
+    current_user: User = Depends(check_super_admin())
 ):
     if request.state_code:
         result = await db.execute(select(State).filter(State.code == request.state_code))
@@ -787,6 +797,9 @@ async def create_school(
         if val == "" or val == "null" or val == "undefined" or (isinstance(val, str) and not val.strip()):
             school_data[key] = None
             
+    if not school_data.get("accreditation_type"):
+        school_data["accreditation_type"] = AccreditationType.FRESH.value
+
     from app.infrastructure.database.models import AccreditationStatus
     if school_data.get("accreditation_status") == AccreditationStatus.ACCREDITED.value:
         if not school_data.get("accredited_date"):
@@ -1102,6 +1115,9 @@ async def create_bece_school(
         if val == "" or val == "null" or val == "undefined" or (isinstance(val, str) and not val.strip()):
             school_data[key] = None
             
+    if not school_data.get("accreditation_type"):
+        school_data["accreditation_type"] = AccreditationType.FRESH.value
+
     from app.infrastructure.database.models import AccreditationStatus
     if school_data.get("accreditation_status") == AccreditationStatus.ACCREDITED.value:
         if not school_data.get("accredited_date"):
