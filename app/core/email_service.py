@@ -29,8 +29,7 @@ Login Details:
   Email: {to_email}
   Password: {password}
 
-Portal URL: https://accreditation.neco.gov.ng
-
+Portal URL: https://necoaccre.netlify.app
 Please change your password after your first login.
 
 Regards,
