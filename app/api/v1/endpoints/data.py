@@ -10,8 +10,10 @@ from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECE
 from app.api.v1 import schemas_data as schemas
 from app.core.auth import get_current_user, check_role, check_state_not_locked, check_super_admin
 from app.core.security import get_password_hash
-from app.core.email_service import generate_password, send_credentials_email
+from app.core.email_service import generate_password, send_credentials_email, send_accreditation_alert
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 router = APIRouter()
 
@@ -770,6 +772,8 @@ async def get_school(
     query = select(School).filter(School.code == code)
     if accrd_year:
         query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
     result = await db.execute(query)
     school = result.scalars().first()
     if not school:
@@ -811,10 +815,22 @@ async def create_school(
     await db.commit()
     await db.refresh(db_school)
     
-    # Auto-create user if email is provided
+    # Send initial notification instead of credentials
     if school.email:
-        await _create_or_update_state_user(db, db_school.state_code, db_school.name, school.email, background_tasks)
-        await db.commit()
+        from datetime import datetime
+        
+        # Prepare recipients
+        recipients = [school.email]
+        state_result = await db.execute(select(State).filter(State.code == db_school.state_code))
+        state = state_result.scalars().first()
+        if state and state.email:
+            recipients.append(state.email)
+            
+        background_tasks.add_task(
+            send_accreditation_alert,
+            to_emails=recipients,
+            school_name=db_school.name
+        )
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -837,6 +853,8 @@ async def update_school(
     query = select(School).filter(School.code == code)
     if accrd_year:
         query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
     result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
@@ -870,11 +888,23 @@ async def update_school(
     await db.commit()
     await db.refresh(db_school)
     
-    # Auto-create user if email is newly set or changed
+    # Send notification if email is newly set or changed (instead of credentials)
     new_email = update_data.get("email")
     if new_email and new_email != old_email:
-        await _create_or_update_state_user(db, db_school.state_code, db_school.name, new_email, background_tasks)
-        await db.commit()
+        from datetime import datetime
+        
+        # Prepare recipients
+        recipients = [new_email]
+        state_result = await db.execute(select(State).filter(State.code == db_school.state_code))
+        state = state_result.scalars().first()
+        if state and state.email:
+            recipients.append(state.email)
+            
+        background_tasks.add_task(
+            send_accreditation_alert,
+            to_emails=recipients,
+            school_name=db_school.name
+        )
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -895,6 +925,8 @@ async def approve_school(
     query = select(School).filter(School.code == code)
     if accrd_year:
         query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
     result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
@@ -933,6 +965,8 @@ async def delete_school(
     query = select(School).filter(School.code == code)
     if accrd_year:
         query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
     result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
@@ -962,6 +996,8 @@ async def upload_school_payment_proof(
     query = select(School).filter(School.code == code)
     if accrd_year:
         query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
     result = await db.execute(query)
     school = result.scalars().first()
     if not school:
@@ -995,6 +1031,8 @@ async def upload_bece_school_payment_proof(
     query = select(BECESchool).filter(BECESchool.code == code)
     if accrd_year:
         query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
     result = await db.execute(query)
     school = result.scalars().first()
     if not school:
@@ -1089,6 +1127,8 @@ async def get_bece_school(
     query = select(BECESchool).filter(BECESchool.code == code)
     if accrd_year:
         query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
     result = await db.execute(query)
     school = result.scalars().first()
     if not school:
@@ -1129,9 +1169,22 @@ async def create_bece_school(
     await db.commit()
     await db.refresh(db_school)
     
+    # Send initial notification instead of credentials
     if school.email:
-        await _create_or_update_state_user(db, db_school.state_code, db_school.name, school.email, background_tasks)
-        await db.commit()
+        from datetime import datetime
+        
+        # Prepare recipients
+        recipients = [school.email]
+        state_result = await db.execute(select(State).filter(State.code == db_school.state_code))
+        state = state_result.scalars().first()
+        if state and state.email:
+            recipients.append(state.email)
+            
+        background_tasks.add_task(
+            send_accreditation_alert,
+            to_emails=recipients,
+            school_name=db_school.name
+        )
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -1154,6 +1207,8 @@ async def update_bece_school(
     query = select(BECESchool).filter(BECESchool.code == code)
     if accrd_year:
         query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
     result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
@@ -1184,10 +1239,23 @@ async def update_bece_school(
     await db.commit()
     await db.refresh(db_school)
     
+    # Send notification if email is newly set or changed (instead of credentials)
     new_email = update_data.get("email")
     if new_email and new_email != old_email:
-        await _create_or_update_state_user(db, db_school.state_code, db_school.name, new_email, background_tasks)
-        await db.commit()
+        from datetime import datetime
+        
+        # Prepare recipients
+        recipients = [new_email]
+        state_result = await db.execute(select(State).filter(State.code == db_school.state_code))
+        state = state_result.scalars().first()
+        if state and state.email:
+            recipients.append(state.email)
+            
+        background_tasks.add_task(
+            send_accreditation_alert,
+            to_emails=recipients,
+            school_name=db_school.name
+        )
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -1208,6 +1276,8 @@ async def approve_bece_school(
     query = select(BECESchool).filter(BECESchool.code == code)
     if accrd_year:
         query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
     result = await db.execute(query)
     db_bece_school = result.scalars().first()
     if not db_bece_school:
@@ -1246,6 +1316,8 @@ async def delete_bece_school(
     query = select(BECESchool).filter(BECESchool.code == code)
     if accrd_year:
         query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
     result = await db.execute(query)
     db_school = result.scalars().first()
     if not db_school:
@@ -1385,3 +1457,70 @@ async def duplicate_schools_for_year(
         schools_duplicated=schools_count,
         bece_schools_duplicated=bece_count
     )
+
+
+@router.post("/schools/send-manual-emails")
+async def send_manual_emails(
+    request_data: schemas.ManualEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
+):
+    """
+    Manually send accreditation alerts to selected schools.
+    """
+    results = []
+    for item in request_data.schools:
+        model = School if item.type == "SSCE" else BECESchool
+        result = await db.execute(select(model).filter(model.code == item.code).order_by(model.accrd_year.desc()))
+        school = result.scalars().first()
+        
+        if not school:
+            results.append({"code": item.code, "status": "failed", "detail": "School not found"})
+            continue
+            
+        if not school.email:
+            results.append({"code": item.code, "status": "failed", "detail": "School has no email address"})
+            continue
+            
+        if not school.accredited_date:
+            results.append({"code": item.code, "status": "failed", "detail": "School has no accredited date"})
+            continue
+            
+        try:
+            # Prepare recipients
+            recipients = [school.email]
+            
+            # Add state email if available
+            state_result = await db.execute(select(State).filter(State.code == school.state_code))
+            state = state_result.scalars().first()
+            if state and state.email:
+                recipients.append(state.email)
+            
+            # Send the alert
+            success = send_accreditation_alert(
+                to_emails=recipients,
+                school_name=school.name
+            )
+            
+            if success:
+                results.append({"code": item.code, "status": "success"})
+                # Audit log
+                await log_activity(
+                    db=db,
+                    user_id=current_user.id,
+                    user_role=current_user.role,
+                    action=AuditAction.UPDATE,
+                    resource_type=AuditResource.SCHOOL,
+                    resource_id=school.code,
+                    details=f"Manually sent accreditation alert to {school.name}",
+                    ip_address=request.client.host if request else None
+                )
+            else:
+                results.append({"code": item.code, "status": "failed", "detail": "Failed to send email"})
+                
+        except Exception as e:
+            results.append({"code": item.code, "status": "failed", "detail": str(e)})
+
+    await db.commit()
+    return {"message": "Email processing complete", "results": results}

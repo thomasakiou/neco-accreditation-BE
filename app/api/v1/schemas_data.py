@@ -194,3 +194,11 @@ class DuplicateForYearResponse(BaseModel):
     message: str
     schools_duplicated: int
     bece_schools_duplicated: int
+
+# Manual Email Trigger Schemas
+class ManualEmailSchool(BaseModel):
+    code: str
+    type: Literal["SSCE", "BECE"]
+
+class ManualEmailRequest(BaseModel):
+    schools: List[ManualEmailSchool]

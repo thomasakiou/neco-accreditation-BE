@@ -37,7 +37,7 @@ NECO Accreditation Team
 """
 
     msg = MIMEMultipart()
-    msg['From'] = settings.SMTP_USER
+    msg['From'] = f"NECO Accreditation <{settings.SMTP_USER}>"
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
@@ -65,31 +65,50 @@ NECO Accreditation Team
         print(f"  Email: {to_email}")
         print(f"  Password: {password}")
         return False
-def send_accreditation_alert(to_emails: list, school_name: str, expiry_date: str, time_left: str) -> bool:
+def send_accreditation_alert(to_emails: list, school_name: str, cc_emails: list = None) -> bool:
     """
     Send accreditation renewal alert to school, state, and HQ.
+    Always CC accreditation@neco.gov.ng as per the requirement.
     """
     subject = f"NECO Accreditation Alert - {school_name}"
     body = f"""
-Dear Stakeholder,
+<html>
+<body>
+<p>Dear Stakeholder,</p>
 
-This is an automated alert from the NECO Accreditation Portal.
+<p>This is an automated alert from the NECO Accreditation Portal.</p>
 
-School Name: {school_name}
-Accreditation Expiry Date: {expiry_date}
-Time Remaining: {time_left}
+<p><b>School Name:</b> {school_name}<br>
+<b>Accreditation Expiry Date:</b> You are due for accreditation on the upcoming accreditation date.</p>
 
-Please take the necessary steps to renew the accreditation before the expiration date.
+<p>Please take the necessary steps to renew your school's accreditation.<br>
+For further enquiries, contact the NECO State Office in your State.</p>
 
-Regards,
-NECO Accreditation Team
+<p>Regards,<br>
+NECO Accreditation Team</p>
+</body>
+</html>
 """
 
     msg = MIMEMultipart()
-    msg['From'] = settings.SMTP_USER
+    msg['From'] = f"NECO Accreditation <{settings.SMTP_USER}>"
     msg['To'] = ", ".join(to_emails)
+    
+    # Always include the mandatory CC
+    mandatory_cc = "accreditation@neco.gov.ng"
+    all_ccs = [mandatory_cc]
+    if cc_emails:
+        all_ccs.extend(cc_emails)
+    
+    # Remove duplicates
+    all_ccs = list(set(all_ccs))
+    msg['Cc'] = ", ".join(all_ccs)
+    
     msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
+    msg.attach(MIMEText(body, 'html'))
+
+    # All recipients combined for SMTP send_message
+    recipients = to_emails + all_ccs
 
     try:
         if settings.SMTP_HOST:
@@ -97,12 +116,12 @@ NECO Accreditation Team
             if settings.SMTP_TLS:
                 server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg)
+            server.send_message(msg, from_addr=settings.SMTP_USER, to_addrs=recipients)
             server.quit()
-            print(f"[EMAIL-ALERT] Accreditation alert sent for {school_name} to {to_emails}")
+            print(f"[EMAIL-ALERT] Accreditation alert sent for {school_name} to {to_emails} (CC: {all_ccs})")
             return True
         else:
-            print(f"[EMAIL-FALLBACK] No SMTP configured. Accreditation alert for {school_name} ({time_left} left) would be sent to {to_emails}")
+            print(f"[EMAIL-FALLBACK] No SMTP configured. Accreditation alert for {school_name} would be sent to {to_emails} (CC: {all_ccs})")
             return True
     except Exception as e:
         print(f"[EMAIL-ERROR] Failed to send alert for {school_name}: {e}")

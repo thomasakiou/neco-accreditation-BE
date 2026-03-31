@@ -21,8 +21,8 @@ def check_accreditation():
             schools = db.query(model).filter(model.accreditation_status == AccreditationStatus.ACCREDITED.value).all()
             
             for school in schools:
-            if not school.accredited_date:
-                continue
+                if not school.accredited_date:
+                    continue
             
             try:
                 # Assuming accredited_date is stored in ISO format (YYYY-MM-DD...)
