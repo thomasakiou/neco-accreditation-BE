@@ -3,6 +3,7 @@ import string
 import secrets
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -125,4 +126,66 @@ NECO Accreditation Team</p>
             return True
     except Exception as e:
         print(f"[EMAIL-ERROR] Failed to send alert for {school_name}: {e}")
+        return False
+
+def send_state_accreditation_report(
+    to_email: str, 
+    cc_emails: list, 
+    state_name: str, 
+    pdf_bytes: bytes, 
+    filename: str = "accreditation_report.pdf"
+) -> bool:
+    """
+    Send the accreditation report PDF to the state ministry and official emails.
+    """
+    subject = f"NECO Accreditation Report - {state_name} State"
+    body = f"""
+Dear Stakeholder,
+
+Please find attached the report of schools due for accreditation in {state_name} State.
+The report contains tables of schools due for Fresh Accreditation and Re-Accreditation, including their categories.
+
+Regards,
+NECO Accreditation Team
+"""
+
+    msg = MIMEMultipart()
+    msg['From'] = f"NECO Accreditation <{settings.SMTP_USER}>"
+    msg['To'] = to_email
+    
+    # Always include the mandatory CC
+    mandatory_cc = "accreditation@neco.gov.ng"
+    all_ccs = [mandatory_cc]
+    if cc_emails:
+        all_ccs.extend(cc_emails)
+    
+    # Remove duplicates and empty strings
+    all_ccs = list(set([cc for cc in all_ccs if cc]))
+    msg['Cc'] = ", ".join(all_ccs)
+    msg['Subject'] = subject
+    
+    msg.attach(MIMEText(body, 'plain'))
+    
+    # Attach PDF
+    part = MIMEApplication(pdf_bytes, Name=filename)
+    part['Content-Disposition'] = f'attachment; filename="{filename}"'
+    msg.attach(part)
+    
+    recipients = [to_email] + all_ccs
+
+    try:
+        if settings.SMTP_HOST:
+            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+            if settings.SMTP_TLS:
+                server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(msg, from_addr=settings.SMTP_USER, to_addrs=recipients)
+            server.quit()
+            print(f"[EMAIL-REPORT] Report sent for {state_name} to {to_email} (CC: {all_ccs})")
+            return True
+        else:
+            print(f"[EMAIL-FALLBACK] No SMTP configured. Report for {state_name} would be sent to {to_email} (CC: {all_ccs})")
+            return True
+    except Exception as e:
+        print(f"[EMAIL-ERROR] Failed to send report for {state_name}: {e}")
         return False

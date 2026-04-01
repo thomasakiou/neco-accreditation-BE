@@ -19,3 +19,4 @@ email-validator
 python-dateutil
 dbf
 xlrd
+reportlab

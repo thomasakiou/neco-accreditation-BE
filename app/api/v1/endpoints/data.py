@@ -10,7 +10,8 @@ from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECE
 from app.api.v1 import schemas_data as schemas
 from app.core.auth import get_current_user, check_role, check_state_not_locked, check_super_admin
 from app.core.security import get_password_hash
-from app.core.email_service import generate_password, send_credentials_email, send_accreditation_alert
+from app.core.email_service import generate_password, send_credentials_email, send_accreditation_alert, send_state_accreditation_report
+from app.core.pdf_service import generate_state_accreditation_report
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -201,6 +202,72 @@ async def delete_state(
         except: pass
     
     return None
+
+@router.post("/states/{code}/send-report")
+async def send_state_report(
+    code: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    request: Request = None
+):
+    from sqlalchemy.orm import selectinload
+    # 1. Fetch State
+    result = await db.execute(select(State).filter(State.code == code))
+    state = result.scalars().first()
+    if not state:
+        raise HTTPException(status_code=404, detail="State not found")
+        
+    if not state.ministry_email:
+        raise HTTPException(status_code=400, detail="State ministry email is not set")
+
+    # 2. Fetch Schools and BECESchools due for accreditation
+    statuses_due = ["Unaccredited", "Pending", "Re-accreditation"]
+    
+    schools_query = select(School).options(selectinload(School.lga), selectinload(School.custodian)).filter(
+        School.state_code == code,
+        School.accreditation_status.in_(statuses_due)
+    )
+    schools_result = await db.execute(schools_query)
+    schools_due = schools_result.scalars().all()
+    
+    bece_schools_query = select(BECESchool).options(selectinload(BECESchool.lga), selectinload(BECESchool.custodian)).filter(
+        BECESchool.state_code == code,
+        BECESchool.accreditation_status.in_(statuses_due)
+    )
+    bece_schools_result = await db.execute(bece_schools_query)
+    bece_schools_due = bece_schools_result.scalars().all()
+
+    # 3. Generate PDF Report
+    pdf_bytes = generate_state_accreditation_report(state, schools_due, bece_schools_due)
+    
+    # 4. Enqueue email to be sent
+    cc_emails = [state.email] if state.email else []
+    background_tasks.add_task(
+        send_state_accreditation_report,
+        to_email=state.ministry_email,
+        cc_emails=cc_emails,
+        state_name=state.name,
+        pdf_bytes=pdf_bytes
+    )
+    
+    # Audit log
+    if current_user.role != UserRole.ADMIN.value:
+        try:
+             await log_activity(
+                 db=db, 
+                 user_id=current_user.id, 
+                 user_role=current_user.role, 
+                 action=AuditAction.EXPORT, 
+                 resource_type=AuditResource.STATE, 
+                 resource_id=code, 
+                 details=f"Sent accreditation report for state {state.name}", 
+                 ip_address=request.client.host if request else None
+             )
+             await db.commit()
+        except: pass
+        
+    return {"message": f"Report generation initiated and will be sent to {state.ministry_email}"}
 
 
 # --- State Lock/Unlock (Admin only) ---
