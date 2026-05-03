@@ -50,6 +50,36 @@ async def _create_or_update_state_user(db: AsyncSession, state_code: str, state_
     return password
 
 
+async def _create_or_update_zone_user(db: AsyncSession, zone_code: str, zone_name: str, email: str, background_tasks: BackgroundTasks):
+    """Create a user for the zone email if it doesn't exist, or update/reset the existing one."""
+    result = await db.execute(select(User).filter(User.email == email))
+    existing_user = result.scalars().first()
+    
+    # Generate a random 8-digit password
+    password = generate_password(8)
+    
+    if existing_user:
+        # Update existing user's zone_code and reset password
+        existing_user.zone_code = zone_code
+        existing_user.hashed_password = get_password_hash(password)
+        db.add(existing_user)
+    else:
+        # Create new user
+        new_user = User(
+            email=email,
+            hashed_password=get_password_hash(password),
+            role=UserRole.ZONE.value,
+            zone_code=zone_code,
+            is_active=True,
+        )
+        db.add(new_user)
+    
+    # Send credentials via email in the background
+    background_tasks.add_task(send_credentials_email, email, password, zone_name, "Zonal Coordinator")
+    
+    return password
+
+
 # --- States ---
 @router.get("/states", response_model=List[schemas.State])
 async def get_states(
@@ -57,9 +87,12 @@ async def get_states(
     current_user: User = Depends(get_current_user),
     request: Request = None
 ):
-    # Admin, HQ, and Viewer can see all, State users see only their state
-    if current_user.role in [UserRole.ADMIN.value, UserRole.HQ.value, UserRole.VIEWER.value]:
+    # Admin, HQ, and Accountant can see all, State users see only their state, Zone users see states in their zone
+    if current_user.role in [UserRole.ADMIN.value, UserRole.HQ.value, UserRole.ACCOUNTANT.value]:
         result = await db.execute(select(State))
+        states = result.scalars().all()
+    elif current_user.role == UserRole.ZONE.value:
+        result = await db.execute(select(State).filter(State.zone_code == current_user.zone_code))
         states = result.scalars().all()
     else:
         result = await db.execute(select(State).filter(State.code == current_user.state_code))
@@ -79,8 +112,10 @@ async def get_state(
     if not state:
         raise HTTPException(status_code=404, detail="State not found")
     
-    # RBAC: State user can only see their own state
+    # RBAC: State user can only see their own state, Zone user can only see states in their zone
     if current_user.role == UserRole.STATE.value and current_user.state_code != code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if current_user.role == UserRole.ZONE.value and state.zone_code != current_user.zone_code:
         raise HTTPException(status_code=403, detail="Permission denied")
         
     return state
@@ -341,11 +376,17 @@ async def get_zone(
     zone = result.scalars().first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")
+        
+    # RBAC: Zone user can only see their own zone
+    if current_user.role == UserRole.ZONE.value and current_user.zone_code != code:
+        raise HTTPException(status_code=403, detail="Permission denied")
+        
     return zone
 
 @router.post("/zones", response_model=schemas.Zone)
 async def create_zone(
     zone: schemas.ZoneCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
@@ -354,6 +395,11 @@ async def create_zone(
     db.add(db_zone)
     await db.commit()
     await db.refresh(db_zone)
+    
+    # Auto-create user if zone_email is provided
+    if zone.zone_email:
+        await _create_or_update_zone_user(db, db_zone.code, db_zone.name, zone.zone_email, background_tasks)
+        await db.commit()
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -367,6 +413,7 @@ async def create_zone(
 async def update_zone(
     code: str,
     zone_in: schemas.ZoneUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
     request: Request = None
@@ -376,6 +423,8 @@ async def update_zone(
     if not db_zone:
         raise HTTPException(status_code=404, detail="Zone not found")
     
+    old_email = db_zone.zone_email
+    
     update_data = zone_in.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_zone, field, value)
@@ -383,6 +432,12 @@ async def update_zone(
     db.add(db_zone)
     await db.commit()
     await db.refresh(db_zone)
+    
+    # Auto-create user if email is newly set or changed
+    new_email = update_data.get("zone_email")
+    if new_email and new_email != old_email:
+        await _create_or_update_zone_user(db, db_zone.code, db_zone.name, new_email, background_tasks)
+        await db.commit()
     
     if current_user.role != UserRole.ADMIN.value:
         try:
@@ -427,6 +482,8 @@ async def get_lgas(
     query = select(LGA)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(LGA.state_code == current_user.state_code)
+    elif current_user.role == UserRole.ZONE.value:
+        query = query.join(State).filter(State.zone_code == current_user.zone_code)
     elif state_code:
         query = query.filter(LGA.state_code == state_code)
     result = await db.execute(query)
@@ -443,9 +500,14 @@ async def get_lga(
     if not lga:
         raise HTTPException(status_code=404, detail="LGA not found")
     
-    # RBAC: State user can only see LGAs in their state
+    # RBAC: State user can only see LGAs in their state, Zone user in their zone
     if current_user.role == UserRole.STATE.value and lga.state_code != current_user.state_code:
         raise HTTPException(status_code=403, detail="Permission denied")
+    if current_user.role == UserRole.ZONE.value:
+        result = await db.execute(select(State).filter(State.code == lga.state_code))
+        st = result.scalars().first()
+        if not st or st.zone_code != current_user.zone_code:
+            raise HTTPException(status_code=403, detail="Permission denied")
         
     return lga
 
@@ -534,6 +596,8 @@ async def get_custodians(
     query = select(Custodian)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(Custodian.state_code == current_user.state_code)
+    elif current_user.role == UserRole.ZONE.value:
+        query = query.join(State).filter(State.zone_code == current_user.zone_code)
     elif state_code:
         query = query.filter(Custodian.state_code == state_code)
     
@@ -661,6 +725,8 @@ async def get_bece_custodians(
     query = select(BECECustodian)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(BECECustodian.state_code == current_user.state_code)
+    elif current_user.role == UserRole.ZONE.value:
+        query = query.join(State).filter(State.zone_code == current_user.zone_code)
     elif state_code:
         query = query.filter(BECECustodian.state_code == state_code)
     
@@ -799,9 +865,11 @@ async def get_schools(
 ):
     query = select(School)
     
-    # State user constraint
+    # State/Zone user constraint
     if current_user.role == UserRole.STATE.value:
         query = query.filter(School.state_code == current_user.state_code)
+    elif current_user.role == UserRole.ZONE.value:
+        query = query.join(State).filter(State.zone_code == current_user.zone_code)
     elif state_code:
         query = query.filter(School.state_code == state_code)
         
@@ -846,9 +914,14 @@ async def get_school(
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     
-    # RBAC: State user can only see schools in their state
+    # RBAC: State user can only see schools in their state, Zone user in their zone
     if current_user.role == UserRole.STATE.value and school.state_code != current_user.state_code:
         raise HTTPException(status_code=403, detail="Permission denied")
+    if current_user.role == UserRole.ZONE.value:
+        result = await db.execute(select(State).filter(State.code == school.state_code))
+        st = result.scalars().first()
+        if not st or st.zone_code != current_user.zone_code:
+            raise HTTPException(status_code=403, detail="Permission denied")
         
     return school
 
@@ -986,7 +1059,7 @@ async def approve_school(
     code: str,
     accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.ACCOUNTANT])),
     request: Request = None
 ):
     query = select(School).filter(School.code == code)
@@ -1057,7 +1130,7 @@ async def upload_school_payment_proof(
     file: UploadFile = File(...),
     accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE, UserRole.ACCOUNTANT])),
     dependencies=[Depends(check_state_not_locked)]
 ):
     query = select(School).filter(School.code == code)
@@ -1092,7 +1165,7 @@ async def upload_bece_school_payment_proof(
     file: UploadFile = File(...),
     accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE, UserRole.ACCOUNTANT])),
     dependencies=[Depends(check_state_not_locked)]
 ):
     query = select(BECESchool).filter(BECESchool.code == code)
@@ -1157,6 +1230,8 @@ async def get_bece_schools(
     query = select(BECESchool)
     if current_user.role == UserRole.STATE.value:
         query = query.filter(BECESchool.state_code == current_user.state_code)
+    elif current_user.role == UserRole.ZONE.value:
+        query = query.join(State).filter(State.zone_code == current_user.zone_code)
     elif state_code:
         query = query.filter(BECESchool.state_code == state_code)
         
@@ -1201,8 +1276,14 @@ async def get_bece_school(
     if not school:
         raise HTTPException(status_code=404, detail="BECE School not found")
     
+    # RBAC: State user can only see schools in their state, Zone user in their zone
     if current_user.role == UserRole.STATE.value and school.state_code != current_user.state_code:
         raise HTTPException(status_code=403, detail="Permission denied")
+    if current_user.role == UserRole.ZONE.value:
+        result = await db.execute(select(State).filter(State.code == school.state_code))
+        st = result.scalars().first()
+        if not st or st.zone_code != current_user.zone_code:
+            raise HTTPException(status_code=403, detail="Permission denied")
         
     return school
 
@@ -1337,7 +1418,7 @@ async def approve_bece_school(
     code: str,
     accrd_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ])),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.ACCOUNTANT])),
     request: Request = None
 ):
     query = select(BECESchool).filter(BECESchool.code == code)

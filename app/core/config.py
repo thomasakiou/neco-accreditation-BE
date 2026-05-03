@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_TLS: bool = True
 
+    # Fallback SMTP Settings (e.g. Gmail)
+    FALLBACK_SMTP_HOST: str = ""
+    FALLBACK_SMTP_PORT: int = 587
+    FALLBACK_SMTP_USER: str = ""
+    FALLBACK_SMTP_PASSWORD: str = ""
+    FALLBACK_SMTP_TLS: bool = True
+
     class Config:
         env_file = ".env"
 

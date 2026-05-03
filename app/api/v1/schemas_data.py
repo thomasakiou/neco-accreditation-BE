@@ -5,12 +5,14 @@ from typing import Optional, List, Literal
 class ZoneBase(BaseModel):
     code: str
     name: str
+    zone_email: Optional[str] = None
 
 class ZoneCreate(ZoneBase):
     pass
 
 class ZoneUpdate(BaseModel):
     name: Optional[str] = None
+    zone_email: Optional[str] = None
 
 class Zone(ZoneBase):
     class Config:

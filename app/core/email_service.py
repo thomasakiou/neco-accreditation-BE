@@ -15,14 +15,53 @@ def generate_password(length: int = 8) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def send_credentials_email(to_email: str, password: str, state_name: str) -> bool:
+def _send_email_smtp_robust(msg: MIMEMultipart, recipients: list) -> bool:
     """
-    Send login credentials to a state email address.
+    Core helper to send email with primary SMTP and fallback to secondary SMTP.
+    """
+    # 1. Try Primary SMTP
+    if settings.SMTP_HOST:
+        try:
+            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
+            if settings.SMTP_TLS:
+                server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(msg, from_addr=settings.SMTP_USER, to_addrs=recipients)
+            server.quit()
+            return True
+        except Exception as e:
+            print(f"[SMTP-PRIMARY-ERROR] Failed: {e}")
+    
+    # 2. Try Fallback SMTP
+    if settings.FALLBACK_SMTP_HOST:
+        try:
+            print(f"[SMTP-FALLBACK] Attempting fallback via {settings.FALLBACK_SMTP_HOST}...")
+            server = smtplib.SMTP(settings.FALLBACK_SMTP_HOST, settings.FALLBACK_SMTP_PORT, timeout=10)
+            if settings.FALLBACK_SMTP_TLS:
+                server.starttls()
+            server.login(settings.FALLBACK_SMTP_USER, settings.FALLBACK_SMTP_PASSWORD)
+            
+            # Update the 'From' header to match the fallback user for better deliverability
+            msg.replace_header('From', f"NECO Accreditation <{settings.FALLBACK_SMTP_USER}>")
+            
+            server.send_message(msg, from_addr=settings.FALLBACK_SMTP_USER, to_addrs=recipients)
+            server.quit()
+            print(f"[SMTP-FALLBACK-SUCCESS] Email sent via {settings.FALLBACK_SMTP_HOST}")
+            return True
+        except Exception as e:
+            print(f"[SMTP-FALLBACK-ERROR] Failed: {e}")
+            
+    return False
+
+
+def send_credentials_email(to_email: str, password: str, name: str, user_type: str = "State Coordinator") -> bool:
+    """
+    Send login credentials to a state or zone email address.
     Returns True if sent successfully, False otherwise.
     """
     subject = "NECO Accreditation Portal - Your Login Credentials"
     body = f"""
-Dear {state_name} State Coordinator,
+Dear {name} {user_type},
 
 Your account for the NECO Accreditation Portal has been created.
 
@@ -43,26 +82,15 @@ NECO Accreditation Team
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
 
-    try:
-        if settings.SMTP_HOST:
-            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-            if settings.SMTP_TLS:
-                server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-            print(f"[EMAIL] Credentials sent to {to_email}")
-            return True
-        else:
-            # Fallback: log to console when SMTP is not configured
-            print(f"[EMAIL-FALLBACK] No SMTP configured. Credentials for {state_name}:")
-            print(f"  Email: {to_email}")
-            print(f"  Password: {password}")
-            return True
-    except Exception as e:
-        print(f"[EMAIL-ERROR] Failed to send email to {to_email}: {e}")
-        # Still log credentials to console so they are not lost
-        print(f"[EMAIL-FALLBACK] Credentials for {state_name}:")
+    recipients = [to_email]
+    success = _send_email_smtp_robust(msg, recipients)
+    
+    if success:
+        print(f"[EMAIL] Credentials sent to {to_email}")
+        return True
+    else:
+        # Fallback: log to console when SMTP fails or is not configured
+        print(f"[EMAIL-FALLBACK] SMTP failed or not configured. Credentials for {name}:")
         print(f"  Email: {to_email}")
         print(f"  Password: {password}")
         return False
@@ -111,21 +139,16 @@ NECO Accreditation Team</p>
     # All recipients combined for SMTP send_message
     recipients = to_emails + all_ccs
 
-    try:
-        if settings.SMTP_HOST:
-            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-            if settings.SMTP_TLS:
-                server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg, from_addr=settings.SMTP_USER, to_addrs=recipients)
-            server.quit()
-            print(f"[EMAIL-ALERT] Accreditation alert sent for {school_name} to {to_emails} (CC: {all_ccs})")
-            return True
-        else:
-            print(f"[EMAIL-FALLBACK] No SMTP configured. Accreditation alert for {school_name} would be sent to {to_emails} (CC: {all_ccs})")
-            return True
-    except Exception as e:
-        print(f"[EMAIL-ERROR] Failed to send alert for {school_name}: {e}")
+    # All recipients combined for SMTP send_message
+    recipients = to_emails + all_ccs
+
+    success = _send_email_smtp_robust(msg, recipients)
+    
+    if success:
+        print(f"[EMAIL-ALERT] Accreditation alert sent for {school_name} to {to_emails} (CC: {all_ccs})")
+        return True
+    else:
+        print(f"[EMAIL-FALLBACK] SMTP failed or not configured. Accreditation alert for {school_name} would be sent to {to_emails} (CC: {all_ccs})")
         return False
 
 def send_state_accreditation_report(
@@ -173,19 +196,13 @@ NECO Accreditation Team
     
     recipients = [to_email] + all_ccs
 
-    try:
-        if settings.SMTP_HOST:
-            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-            if settings.SMTP_TLS:
-                server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.send_message(msg, from_addr=settings.SMTP_USER, to_addrs=recipients)
-            server.quit()
-            print(f"[EMAIL-REPORT] Report sent for {state_name} to {to_email} (CC: {all_ccs})")
-            return True
-        else:
-            print(f"[EMAIL-FALLBACK] No SMTP configured. Report for {state_name} would be sent to {to_email} (CC: {all_ccs})")
-            return True
-    except Exception as e:
-        print(f"[EMAIL-ERROR] Failed to send report for {state_name}: {e}")
+    recipients = [to_email] + all_ccs
+
+    success = _send_email_smtp_robust(msg, recipients)
+    
+    if success:
+        print(f"[EMAIL-REPORT] Report sent for {state_name} to {to_email} (CC: {all_ccs})")
+        return True
+    else:
+        print(f"[EMAIL-FALLBACK] SMTP failed or not configured. Report for {state_name} would be sent to {to_email} (CC: {all_ccs})")
         return False

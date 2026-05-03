@@ -1,7 +1,7 @@
 import asyncio
 from sqlalchemy import delete
 from app.infrastructure.database.session import SessionLocal, engine, Base
-from app.infrastructure.database.models import User, UserRole
+from app.infrastructure.database.models import User, UserRole, AuditLog
 from app.core.security import get_password_hash
 from app.core.config import get_settings
 
@@ -14,10 +14,12 @@ async def seed_db():
     
     async with SessionLocal() as db:
         try:
-            # Clear existing users to ensure only new data exists
+            # Clear existing data to ensure only new data exists
+            # Clear audit logs first due to foreign key
+            await db.execute(delete(AuditLog))
             await db.execute(delete(User))
             await db.commit()
-            print("Cleared existing users.")
+            print("Cleared existing users and audit logs.")
 
             # Create Admin
             admin_email = settings.ADMIN_EMAIL
@@ -41,16 +43,16 @@ async def seed_db():
             db.add(hq)
             print(f"HQ user created: {hq_email}")
 
-            # Guest Admin User (Read-only VIEWER role)
-            guest_email = "guestadmin@neco.gov.ng"
-            guest_admin = User(
-                email=guest_email,
-                hashed_password=get_password_hash("Guest123"),
-                role=UserRole.VIEWER.value,
+            # Accountant User
+            acc_email = "account@neco.gov.ng"
+            acc = User(
+                email=acc_email,
+                hashed_password=get_password_hash("Account123"),
+                role=UserRole.ACCOUNTANT.value,
                 is_active=True
             )
-            db.add(guest_admin)
-            print(f"Guest Admin user created: {guest_email}")
+            db.add(acc)
+            print(f"Accountant user created: {acc_email}")
             
             await db.commit()
 

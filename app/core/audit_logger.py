@@ -22,7 +22,7 @@ async def log_activity(
     Args:
         db: Database session
         user_id: ID of the user performing the action
-        user_role: Role of the user (admin, hq, state, viewer)
+        user_role: Role of the user (admin, hq, state, accountant)
         action: Type of action (CREATE, READ, UPDATE, DELETE, EXPORT, etc.)
         resource_type: Type of resource being acted upon (SCHOOL, STATE, CUSTODIAN, etc.)
         resource_id: ID of the resource (optional)

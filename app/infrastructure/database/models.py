@@ -9,7 +9,8 @@ class UserRole(enum.Enum):
     HQ = "hq"
     STATE = "state"
     SCHOOL = "school"
-    VIEWER = "viewer"
+    ACCOUNTANT = "accountant"
+    ZONE = "zone"
 
 class AccreditationStatus(enum.Enum):
     ACCREDITED = "Accredited"
@@ -27,14 +28,16 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    role = Column(String) # admin, hq, state, school
+    role = Column(String) # admin, hq, state, school, accountant, zone
     state_code = Column(String, ForeignKey("states.code"), nullable=True)
+    zone_code = Column(String, ForeignKey("zones.code"), nullable=True)
     is_active = Column(Boolean, default=True)
 
 class Zone(Base):
     __tablename__ = "zones"
     code = Column(String, primary_key=True, index=True)
     name = Column(String)
+    zone_email = Column(String, nullable=True)
     
     states = relationship("State", back_populates="zone")
 
@@ -140,7 +143,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    user_role = Column(String, nullable=False)  # admin, hq, state, viewer
+    user_role = Column(String, nullable=False)  # admin, hq, state, accountant
     action = Column(String, nullable=False)  # CREATE, READ, UPDATE, DELETE, EXPORT, etc.
     resource_type = Column(String, nullable=False)  # SCHOOL, STATE, CUSTODIAN, ZONE, LGA, etc.
     resource_id = Column(String, nullable=True)  # ID of the resource

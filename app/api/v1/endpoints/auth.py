@@ -107,7 +107,8 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     return {
         "email": current_user.email,
         "role": current_user.role,
-        "state_code": current_user.state_code
+        "state_code": current_user.state_code,
+        "zone_code": current_user.zone_code
     }
 
 @router.post("/change-password", status_code=status.HTTP_200_OK)
