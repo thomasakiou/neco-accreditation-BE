@@ -1555,10 +1555,10 @@ async def duplicate_schools_for_year(
             text("""
                 INSERT INTO schools (code, accrd_year, name, state_code, lga_code, custodian_code,
                     email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, status)
+                    payment_url, approval_status, gender, status)
                 SELECT code, :target_year, name, state_code, lga_code, custodian_code,
                     email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, status
+                    payment_url, approval_status, gender, status
                 FROM schools
                 WHERE accrd_year = :source_year
             """),
@@ -1572,10 +1572,10 @@ async def duplicate_schools_for_year(
             text("""
                 INSERT INTO bece_schools (code, accrd_year, name, state_code, lga_code, custodian_code,
                     email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, status)
+                    payment_url, approval_status, gender, status)
                 SELECT code, :target_year, name, state_code, lga_code, custodian_code,
                     email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, status
+                    payment_url, approval_status, gender, status
                 FROM bece_schools
                 WHERE accrd_year = :source_year
             """),

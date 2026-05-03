@@ -123,6 +123,7 @@ class SchoolBase(BaseModel):
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
     approval_status: Optional[str] = None
+    gender: Optional[str] = None
     status: str = "active"
 
 class SchoolCreate(SchoolBase):
@@ -142,6 +143,7 @@ class SchoolUpdate(BaseModel):
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
     approval_status: Optional[str] = None
+    gender: Optional[str] = None
     status: Optional[str] = None
 
 class School(SchoolBase):
@@ -163,6 +165,7 @@ class BECESchoolBase(BaseModel):
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
     approval_status: Optional[str] = None
+    gender: Optional[str] = None
     status: str = "active"
 
 class BECESchoolCreate(BECESchoolBase):
@@ -182,6 +185,7 @@ class BECESchoolUpdate(BaseModel):
     accrd_year: Optional[str] = None
     payment_url: Optional[str] = None
     approval_status: Optional[str] = None
+    gender: Optional[str] = None
     status: Optional[str] = None
 
 class BECESchool(BECESchoolBase):

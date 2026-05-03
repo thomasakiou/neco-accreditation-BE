@@ -66,6 +66,7 @@ async def upload_schools(
             category=category_val,
             accrd_year=str(row.get('accrd_year', '')).strip() if pd.notna(row.get('accrd_year')) else None,
             approval_status=str(row.get('approval_status', '')).strip() if pd.notna(row.get('approval_status')) else None,
+            gender=str(row.get('gender', '')).strip() if pd.notna(row.get('gender')) else None,
             status=str(row.get('status', 'active'))
         )
         schools.append(school)
@@ -142,6 +143,7 @@ async def upload_bece_schools(
             category=category_val,
             accrd_year=str(row.get('accrd_year', '')).strip() if pd.notna(row.get('accrd_year')) else None,
             approval_status=str(row.get('approval_status', '')).strip() if pd.notna(row.get('approval_status')) else None,
+            gender=str(row.get('gender', '')).strip() if pd.notna(row.get('gender')) else None,
             status=str(row.get('status', 'active'))
         )
         schools.append(school)

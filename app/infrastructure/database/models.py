@@ -112,6 +112,7 @@ class School(Base):
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     payment_url = Column(String, nullable=True)
     approval_status = Column(String, nullable=True)
+    gender = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="schools")
@@ -133,6 +134,7 @@ class BECESchool(Base):
     category = Column(String, default="PUB", server_default="PUB") # PUB/PRV/FED
     payment_url = Column(String, nullable=True)
     approval_status = Column(String, nullable=True)
+    gender = Column(String, nullable=True)
     status = Column(String, default="active", server_default="active")
 
     state = relationship("State", back_populates="bece_schools")

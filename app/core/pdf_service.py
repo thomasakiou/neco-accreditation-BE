@@ -67,7 +67,8 @@ def generate_state_accreditation_report(state, schools: list, bece_schools: list
             Paragraph("School Name", header_style),
             Paragraph("LGA", header_style),
             Paragraph("Custodian", header_style),
-            Paragraph("Category", header_style)
+            Paragraph("Category", header_style),
+            Paragraph("Gender", header_style)
         ]]
         for sch in categorized_data:
             # Handle potential None access if relationships are not loaded
@@ -81,14 +82,15 @@ def generate_state_accreditation_report(state, schools: list, bece_schools: list
                 Paragraph(str(sch.name or ""), cell_style), 
                 Paragraph(str(lga_name or ""), cell_style), 
                 Paragraph(str(custodian_name or ""), cell_style), 
-                Paragraph(str(category_display or ""), cell_style)
+                Paragraph(str(category_display or ""), cell_style),
+                Paragraph(str(sch.gender or ""), cell_style)
             ])
             
         if len(data) == 1:
             data.append([Paragraph("No schools due", cell_style), "", "", "", ""])
             
         # Create table with percentage widths to fit the page
-        t = Table(data, colWidths=['15%', '35%', '15%', '20%', '15%'])
+        t = Table(data, colWidths=['12%', '30%', '13%', '18%', '15%', '12%'])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.green),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),

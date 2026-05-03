@@ -41,6 +41,7 @@ async def export_schools(
             "category": s.category,
             "accrd_year": s.accrd_year,
             "approval_status": s.approval_status,
+            "gender": s.gender,
             "status": s.status
         })
     
@@ -64,9 +65,10 @@ async def export_schools(
                 "cust_code": d["custodian_code"],
                 "category": d["category"],
                 "accrd_yr": d["accrd_year"],
+                "gender": d["gender"],
                 "status": d["status"]
             })
-        schema = "code C(10); name C(254); st_code C(10); lga_code C(10); cust_code C(10); category C(10); accrd_yr C(10); status C(10)"
+        schema = "code C(10); name C(254); st_code C(10); lga_code C(10); cust_code C(10); category C(10); accrd_yr C(10); gender C(10); status C(10)"
         return export_to_dbf(dbf_data, "schools", schema)
     
     return export_to_excel(data, "schools")
@@ -226,6 +228,7 @@ async def export_bece_schools(
             "category": s.category,
             "accrd_year": s.accrd_year,
             "approval_status": s.approval_status,
+            "gender": s.gender,
             "status": s.status
         })
     
@@ -248,9 +251,10 @@ async def export_bece_schools(
                 "cust_code": d["custodian_code"],
                 "category": d["category"],
                 "accrd_yr": d["accrd_year"],
+                "gender": d["gender"],
                 "status": d["status"]
             })
-        schema = "code C(10); name C(254); st_code C(10); lga_code C(10); cust_code C(10); category C(10); accrd_yr C(10); status C(10)"
+        schema = "code C(10); name C(254); st_code C(10); lga_code C(10); cust_code C(10); category C(10); accrd_yr C(10); gender C(10); status C(10)"
         return export_to_dbf(dbf_data, "bece_schools", schema)
     
     return export_to_excel(data, "bece_schools")
