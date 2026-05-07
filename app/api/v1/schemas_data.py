@@ -192,9 +192,6 @@ class BECESchool(BECESchoolBase):
     class Config:
         from_attributes = True
 
-# Duplicate For Year Schemas
-class DuplicateForYearRequest(BaseModel):
-    year: str
 
 class DuplicateForYearResponse(BaseModel):
     message: str

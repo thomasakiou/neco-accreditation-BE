@@ -10,8 +10,15 @@ from app.infrastructure.database.models import State, LGA, Zone, Custodian, BECE
 from app.api.v1 import schemas_data as schemas
 from app.core.auth import get_current_user, check_role, check_state_not_locked, check_super_admin
 from app.core.security import get_password_hash
-from app.core.email_service import generate_password, send_credentials_email, send_accreditation_alert, send_state_accreditation_report
+from app.core.email_service import (
+    generate_password, 
+    send_credentials_email, 
+    send_accreditation_alert, 
+    send_state_accreditation_report,
+    send_accreditation_certificate
+)
 from app.core.pdf_service import generate_state_accreditation_report
+from app.core.certificate_service import generate_certificate
 from app.core.audit_logger import log_activity, AuditAction, AuditResource
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -78,6 +85,39 @@ async def _create_or_update_zone_user(db: AsyncSession, zone_code: str, zone_nam
     background_tasks.add_task(send_credentials_email, email, password, zone_name, "Zonal Coordinator")
     
     return password
+
+
+def _calculate_expiry_date(accredited_date_str: str, accreditation_status: str, zone_code: str) -> str:
+    """
+    Calculate expiry date based on zone and accreditation status.
+    Logic mirrored from scheduler.py
+    """
+    if not accredited_date_str:
+        return ""
+        
+    try:
+        # Handle ISO with time if present
+        acc_date_str = accredited_date_str.split('T')[0]
+        acc_date = datetime.fromisoformat(acc_date_str).date()
+        
+        # Apply Validity Rules
+        # 1. Foreign Zone (07) gets 10 years
+        if zone_code == "07":
+            validity_years = 10
+        else:
+            # 2. Other zones based on status
+            if accreditation_status in ["Full", "Accredited"]:
+                validity_years = 5
+            elif accreditation_status == "Partial":
+                validity_years = 1
+            else:
+                validity_years = 0
+        
+        expiry_date = acc_date + relativedelta(years=validity_years)
+        return expiry_date.isoformat()
+    except Exception as e:
+        print(f"Error calculating expiry: {e}")
+        return ""
 
 
 # --- States ---
@@ -1094,6 +1134,75 @@ async def approve_school(
         
     return db_school
 
+
+@router.post("/schools/{code}/send-certificate")
+async def send_school_certificate(
+    code: str,
+    accrd_year: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    background_tasks: BackgroundTasks = None,
+    request: Request = None
+):
+    # 1. Fetch School
+    query = select(School).filter(School.code == code)
+    if accrd_year:
+        query = query.filter(School.accrd_year == accrd_year)
+    else:
+        query = query.order_by(School.accrd_year.desc())
+    result = await db.execute(query)
+    school = result.scalars().first()
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+        
+    if not school.email:
+        raise HTTPException(status_code=400, detail="School email is not set")
+        
+    if school.accreditation_status not in ["Full", "Accredited", "Partial"]:
+        raise HTTPException(status_code=400, detail="School is not accredited")
+
+    # 2. Get State for Zone Code
+    state_res = await db.execute(select(State).filter(State.code == school.state_code))
+    state = state_res.scalars().first()
+    zone_code = state.zone_code if state else "01"
+
+    # 3. Calculate Expiry
+    expiry_date = _calculate_expiry_date(school.accredited_date, school.accreditation_status, zone_code)
+    
+    # 4. Generate Certificate
+    cert_bytes = generate_certificate(
+        school_name=school.name,
+        school_code=school.code,
+        accredited_date=school.accredited_date,
+        accreditation_status=school.accreditation_status,
+        school_type="SSCE"
+    )
+    
+    # 5. Send Email
+    background_tasks.add_task(
+        send_accreditation_certificate,
+        to_email=school.email,
+        school_name=school.name,
+        cert_bytes=cert_bytes
+    )
+    
+    # Audit log
+    try:
+        await log_activity(
+            db=db, 
+            user_id=current_user.id, 
+            user_role=current_user.role, 
+            action=AuditAction.EXPORT, 
+            resource_type=AuditResource.SCHOOL, 
+            resource_id=code, 
+            details=f"Sent accreditation certificate for school {school.name}", 
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except: pass
+        
+    return {"message": f"Certificate generation initiated and will be sent to {school.email}"}
+
 @router.delete("/schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_school(
     code: str,
@@ -1453,6 +1562,75 @@ async def approve_bece_school(
         
     return db_bece_school
 
+
+@router.post("/bece-schools/{code}/send-certificate")
+async def send_bece_school_certificate(
+    code: str,
+    accrd_year: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(check_role([UserRole.ADMIN, UserRole.HQ, UserRole.STATE])),
+    background_tasks: BackgroundTasks = None,
+    request: Request = None
+):
+    # 1. Fetch BECE School
+    query = select(BECESchool).filter(BECESchool.code == code)
+    if accrd_year:
+        query = query.filter(BECESchool.accrd_year == accrd_year)
+    else:
+        query = query.order_by(BECESchool.accrd_year.desc())
+    result = await db.execute(query)
+    school = result.scalars().first()
+    if not school:
+        raise HTTPException(status_code=404, detail="BECE School not found")
+        
+    if not school.email:
+        raise HTTPException(status_code=400, detail="School email is not set")
+        
+    if school.accreditation_status not in ["Full", "Accredited", "Partial"]:
+        raise HTTPException(status_code=400, detail="School is not accredited")
+
+    # 2. Get State for Zone Code
+    state_res = await db.execute(select(State).filter(State.code == school.state_code))
+    state = state_res.scalars().first()
+    zone_code = state.zone_code if state else "01"
+
+    # 3. Calculate Expiry
+    expiry_date = _calculate_expiry_date(school.accredited_date, school.accreditation_status, zone_code)
+    
+    # 4. Generate Certificate
+    cert_bytes = generate_certificate(
+        school_name=school.name,
+        school_code=school.code,
+        accredited_date=school.accredited_date,
+        accreditation_status=school.accreditation_status,
+        school_type="BECE"
+    )
+    
+    # 5. Send Email
+    background_tasks.add_task(
+        send_accreditation_certificate,
+        to_email=school.email,
+        school_name=school.name,
+        cert_bytes=cert_bytes
+    )
+    
+    # Audit log
+    try:
+        await log_activity(
+            db=db, 
+            user_id=current_user.id, 
+            user_role=current_user.role, 
+            action=AuditAction.EXPORT, 
+            resource_type=AuditResource.BECE_SCHOOL, 
+            resource_id=code, 
+            details=f"Sent accreditation certificate for BECE school {school.name}", 
+            ip_address=request.client.host if request else None
+        )
+        await db.commit()
+    except: pass
+        
+    return {"message": f"Certificate generation initiated and will be sent to {school.email}"}
+
 @router.delete("/bece-schools/{code}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(check_state_not_locked)])
 async def delete_bece_school(
     code: str,
@@ -1503,18 +1681,19 @@ async def delete_all_zones(
 # --- Duplicate Schools for New Year ---
 @router.post("/schools/duplicate-for-year", response_model=schemas.DuplicateForYearResponse)
 async def duplicate_schools_for_year(
-    body: schemas.DuplicateForYearRequest,
+    target_year: str,
+    from_year: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(check_role([UserRole.ADMIN])),
     request: Request = None
 ):
     """
     Duplicate all school and BECE school records for a new accreditation year.
-    Copies all rows from the most recent year and sets accrd_year to the new year.
+    Copies all rows from the specified or most recent year and sets accrd_year to the new year.
     """
-    target_year = body.year.strip()
+    target_year = target_year.strip()
     if not target_year:
-        raise HTTPException(status_code=400, detail="Year cannot be empty")
+        raise HTTPException(status_code=400, detail="Target year cannot be empty")
 
     # Check if data already exists for the target year
     existing_schools = await db.execute(
@@ -1535,16 +1714,20 @@ async def duplicate_schools_for_year(
             detail=f"BECE Schools data for year {target_year} already exists. Delete it first or choose a different year."
         )
 
-    # Find the most recent year to copy from
-    latest_school_year = await db.execute(
-        text("SELECT DISTINCT accrd_year FROM schools ORDER BY accrd_year DESC LIMIT 1")
-    )
-    source_school_year = latest_school_year.scalar()
+    # Find the source years to copy from
+    if from_year:
+        source_school_year = from_year
+        source_bece_year = from_year
+    else:
+        latest_school_year = await db.execute(
+            text("SELECT DISTINCT accrd_year FROM schools ORDER BY accrd_year DESC LIMIT 1")
+        )
+        source_school_year = latest_school_year.scalar()
 
-    latest_bece_year = await db.execute(
-        text("SELECT DISTINCT accrd_year FROM bece_schools ORDER BY accrd_year DESC LIMIT 1")
-    )
-    source_bece_year = latest_bece_year.scalar()
+        latest_bece_year = await db.execute(
+            text("SELECT DISTINCT accrd_year FROM bece_schools ORDER BY accrd_year DESC LIMIT 1")
+        )
+        source_bece_year = latest_bece_year.scalar()
 
     schools_count = 0
     bece_count = 0
@@ -1554,11 +1737,11 @@ async def duplicate_schools_for_year(
         result = await db.execute(
             text("""
                 INSERT INTO schools (code, accrd_year, name, state_code, lga_code, custodian_code,
-                    email, accreditation_status, accredited_date, category,
+                    email, accreditation_status, accreditation_type, accredited_date, category,
                     payment_url, approval_status, gender, status)
                 SELECT code, :target_year, name, state_code, lga_code, custodian_code,
-                    email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, gender, status
+                    email, accreditation_status, accreditation_type, accredited_date, category,
+                    NULL, approval_status, gender, status
                 FROM schools
                 WHERE accrd_year = :source_year
             """),
@@ -1571,11 +1754,11 @@ async def duplicate_schools_for_year(
         result = await db.execute(
             text("""
                 INSERT INTO bece_schools (code, accrd_year, name, state_code, lga_code, custodian_code,
-                    email, accreditation_status, accredited_date, category,
+                    email, accreditation_status, accreditation_type, accredited_date, category,
                     payment_url, approval_status, gender, status)
                 SELECT code, :target_year, name, state_code, lga_code, custodian_code,
-                    email, accreditation_status, accredited_date, category,
-                    payment_url, approval_status, gender, status
+                    email, accreditation_status, accreditation_type, accredited_date, category,
+                    NULL, approval_status, gender, status
                 FROM bece_schools
                 WHERE accrd_year = :source_year
             """),

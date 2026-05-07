@@ -206,3 +206,50 @@ NECO Accreditation Team
     else:
         print(f"[EMAIL-FALLBACK] SMTP failed or not configured. Report for {state_name} would be sent to {to_email} (CC: {all_ccs})")
         return False
+
+def send_accreditation_certificate(
+    to_email: str,
+    school_name: str,
+    cert_bytes: bytes,
+    filename: str = "accreditation_certificate.png"
+) -> bool:
+    """
+    Send the generated accreditation certificate PNG to the school.
+    """
+    subject = f"NECO Accreditation Certificate - {school_name}"
+    body = f"""
+Dear Principal,
+
+Congratulations! Your school, {school_name}, has been successfully accredited by the National Examinations Council (NECO).
+
+Please find attached your official Accreditation Certificate.
+
+Regards,
+NECO Accreditation Team
+"""
+
+    msg = MIMEMultipart()
+    msg['From'] = f"NECO Accreditation <{settings.SMTP_USER}>"
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    
+    msg.attach(MIMEText(body, 'plain'))
+    
+    # Attach PNG
+    part = MIMEApplication(cert_bytes, Name=filename)
+    part['Content-Disposition'] = f'attachment; filename="{filename}"'
+    msg.attach(part)
+    
+    # Always include the mandatory CC
+    mandatory_cc = "accreditation@neco.gov.ng"
+    recipients = [to_email, mandatory_cc]
+    msg['Cc'] = mandatory_cc
+
+    success = _send_email_smtp_robust(msg, recipients)
+    
+    if success:
+        print(f"[EMAIL-CERT] Certificate sent for {school_name} to {to_email}")
+        return True
+    else:
+        print(f"[EMAIL-FALLBACK] SMTP failed. Certificate for {school_name} would be sent to {to_email}")
+        return False
